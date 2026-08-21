@@ -25,16 +25,12 @@ KILL_SWITCH_CHANNEL = "sentinel:kill_switch"
 AGENT_STATE_KEY_PREFIX = "agent:state:"
 AGENT_KILL_TIME_PREFIX = "agent:kill_time:"
 
-# Known agents in the fleet. In production this would come from a service registry.
-KNOWN_FLEET_AGENTS = [
-    "agent_cust_srv_01",
-    "agent_trading_01",
-    "agent_fraud_monitor_01",
-    "agent_credit_ops_01",
-    "agent_treasury_001",
-    "agent_procurement_001",
-    "agent_underwriting_001"
-]
+# Known agents in the fleet are now dynamically fetched from the service registry
+from agent_registry import list_agents
+
+def get_known_fleet_agents() -> List[str]:
+    """Dynamically fetch the list of ACTIVE registered agent IDs from the registry."""
+    return [agent["agent_id"] for agent in list_agents(status="ACTIVE")]
 
 
 def _set_agent_state(agent_id: str, state: str):
@@ -86,7 +82,9 @@ def quarantine_fleet(triggered_by: str = "system") -> dict:
     kill_time = datetime.now(timezone.utc).isoformat()
     quarantined = []
 
-    for agent_id in KNOWN_FLEET_AGENTS:
+    fleet_agents = get_known_fleet_agents()
+
+    for agent_id in fleet_agents:
         _set_agent_state(agent_id, "QUARANTINED")
         redis_client.set(f"{AGENT_KILL_TIME_PREFIX}{agent_id}", kill_time)
         quarantined.append(agent_id)
@@ -135,7 +133,8 @@ def release_agent(agent_id: str, released_by: str = "system") -> dict:
 def get_fleet_status() -> dict:
     """Return the current state of every known fleet agent."""
     fleet = {}
-    for agent_id in KNOWN_FLEET_AGENTS:
+    fleet_agents = get_known_fleet_agents()
+    for agent_id in fleet_agents:
         state = get_agent_state(agent_id)
         kill_time = redis_client.get(f"{AGENT_KILL_TIME_PREFIX}{agent_id}")
         fleet[agent_id] = {
@@ -146,8 +145,8 @@ def get_fleet_status() -> dict:
     quarantined_count = sum(1 for v in fleet.values() if v["state"] == "QUARANTINED")
     return {
         "fleet":              fleet,
-        "total_agents":       len(KNOWN_FLEET_AGENTS),
+        "total_agents":       len(fleet_agents),
         "quarantined_count":  quarantined_count,
-        "active_count":       len(KNOWN_FLEET_AGENTS) - quarantined_count,
+        "active_count":       len(fleet_agents) - quarantined_count,
         "fleet_health":       "DEGRADED" if quarantined_count > 0 else "HEALTHY",
     }

@@ -1,37 +1,47 @@
-﻿import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   LineChart,
+  BarChart,
+  Bar,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  Tooltip as RTooltip,
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+import { useState } from "react";
 
 import {
   fetchRegistryAgent,
   fetchTrustHistory,
   updateAgentLifecycle,
   pushTrustSignal,
+  fetchBehaviorBaseline,
+  fetchBehaviorDeviation,
+  fetchBehaviorTimeline,
   TIER_TOKEN,
   fmtTime,
   trustToken,
   type AgentLifecycle,
   type TrustEvent,
+  type BehaviorBaseline,
+  type BehaviorDeviationReport,
+  type BehaviorTimelineEntry,
 } from "@/lib/sentinel";
 import { StatusPill } from "@/components/sentinel/primitives";
 import { AutonomyBadge, TrustScoreBadge } from "@/components/sentinel/autonomy-badge";
 import { Modal, GhostBtn } from "@/components/sentinel/modal";
-import { useState } from "react";
 
 export const Route = createFileRoute("/agents_/$id")({
   component: AgentDetailPage,
 });
+
 
 // ── Trust Timeline Chart ─────────────────────────────────────────────────────
 function TrustTimeline({ events }: { events: TrustEvent[] }) {
@@ -129,7 +139,149 @@ function TrustEventLog({ events }: { events: TrustEvent[] }) {
   );
 }
 
-// ── Push Signal Modal (admin override) ──────────────────────────────────────
+// ── Behavior Monitor Panel ───────────────────────────────────────────────────
+
+const SEVERITY_COLOR: Record<string, string> = {
+  NORMAL:   "var(--allow)",
+  MILD:     "var(--hitl)",
+  MODERATE: "var(--duplicate)",
+  SEVERE:   "var(--deny)",
+};
+
+function BehaviorPanel({
+  baseline,
+  deviation,
+  timeline,
+}: {
+  baseline: BehaviorBaseline | null;
+  deviation: BehaviorDeviationReport | null;
+  timeline: BehaviorTimelineEntry[];
+}) {
+  // ── Baseline not yet established ──
+  if (!baseline || !baseline.baseline_locked) {
+    const needed = baseline?.samples_needed ?? 10;
+    const done   = 10 - needed;
+    const pct    = Math.round((done / 10) * 100);
+    return (
+      <div className="glass rounded-[24px] p-6">
+        <h2 className="text-[15px] font-medium mb-4">Behavior Monitor</h2>
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <p className="text-[13px] text-muted-foreground">
+            Baseline not yet established — {needed} more actions needed.
+          </p>
+          <div className="w-full max-w-xs bg-border/30 rounded-full h-2 overflow-hidden">
+            <div
+              className="h-2 rounded-full transition-all"
+              style={{ width: `${pct}%`, background: "var(--accent)" }}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground mono">{done}/10 actions recorded</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Deviation timeline chart ──
+  const chartData = [...timeline].reverse().map((t) => ({
+    time:  fmtTime(t.timestamp),
+    score: t.deviation_score,
+    color: SEVERITY_COLOR[t.severity] ?? "var(--allow)",
+  }));
+
+  const sev = deviation?.severity ?? "NORMAL";
+  const sevColor = SEVERITY_COLOR[sev];
+
+  return (
+    <div className="glass rounded-[24px] p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[15px] font-medium">Behavior Monitor</h2>
+        {deviation && (
+          <span
+            className="rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
+            style={{ background: `${sevColor}22`, color: sevColor }}
+          >
+            {sev} — Score {deviation.deviation_score}/100
+          </span>
+        )}
+      </div>
+
+      {/* Baseline stats grid */}
+      <div>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Baseline Profile ({baseline.baseline_sample_size} samples)</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[12px]">
+          <BehStat k="Avg Amount" v={`₹${(baseline.avg_amount ?? 0).toLocaleString()}`} />
+          <BehStat k="Avg Depth" v={String(baseline.avg_call_depth ?? 0)} />
+          <BehStat k="Avg Velocity" v={`${baseline.avg_actions_per_minute?.toFixed(2) ?? 0} req/min`} />
+          <BehStat k="Top Tools" v={(baseline.top_tools ?? []).join(", ") || "none"} />
+          <BehStat k="Common Accounts" v={(baseline.common_accounts ?? []).slice(0, 3).join(", ") || "none"} />
+        </div>
+      </div>
+
+      {/* Latest deviation report */}
+      {deviation && deviation.flags.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Latest Deviation Flags</p>
+          <div className="flex flex-wrap gap-2">
+            {deviation.flags.map((f) => (
+              <span
+                key={f}
+                className="rounded-full px-2.5 py-1 text-[11px] font-mono font-medium"
+                style={{ background: `${sevColor}22`, color: sevColor }}
+              >
+                {f.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+          {deviation.trust_signal_emitted && (
+            <p className="mt-3 text-[12px] text-muted-foreground">
+              Signal emitted: <span className="font-mono" style={{ color: sevColor }}>{deviation.trust_signal_emitted.replace(/_/g, " ")}</span>
+              {" · "}
+              Trust Δ: <span style={{ color: "var(--deny)" }}>{deviation.trust_delta.toFixed(1)}</span>
+              {" · "}
+              Risk boost: <span style={{ color: "var(--deny)" }}>+{deviation.risk_boost}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Deviation score timeline chart */}
+      {chartData.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Deviation Score History</p>
+          <div className="h-40 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.07)" />
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
+                <RTooltip
+                  formatter={(v: number) => [`${v}/100`, "Deviation Score"]}
+                  contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                />
+                <Bar dataKey="score" fill="var(--accent)" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {chartData.length === 0 && (
+        <p className="text-center text-[13px] text-muted-foreground py-4">No deviation history yet — fire actions via Demo Sandbox.</p>
+      )}
+    </div>
+  );
+}
+
+function BehStat({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="rounded-[12px] border border-border/40 bg-white/20 px-3 py-2">
+      <dt className="text-[10px] text-muted-foreground mb-0.5">{k}</dt>
+      <dd className="mono text-[12px] font-medium truncate" title={v}>{v}</dd>
+    </div>
+  );
+}
+
+// ── Push Signal Modal (admin override) ───────────────────────────────────────
 const SIGNAL_OPTIONS = [
   "ACTION_ALLOWED", "POLICY_PASSED", "HITL_APPROVED",
   "ACTION_DENIED_POLICY", "ACTION_DENIED_VELOCITY",
@@ -207,6 +359,24 @@ function AgentDetailPage() {
     queryKey: ["trustHistory", id],
     queryFn: () => fetchTrustHistory(id, 100),
     refetchInterval: 8_000,
+  });
+
+  const { data: baseline = null } = useQuery({
+    queryKey: ["behaviorBaseline", id],
+    queryFn: () => fetchBehaviorBaseline(id),
+    refetchInterval: 10_000,
+  });
+
+  const { data: deviation = null } = useQuery({
+    queryKey: ["behaviorDeviation", id],
+    queryFn: () => fetchBehaviorDeviation(id),
+    refetchInterval: 10_000,
+  });
+
+  const { data: behaviorTimeline = [] } = useQuery({
+    queryKey: ["behaviorTimeline", id],
+    queryFn: () => fetchBehaviorTimeline(id, 100),
+    refetchInterval: 10_000,
   });
 
   const mutate = useMutation({
@@ -349,6 +519,13 @@ function AgentDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Behavior Monitor */}
+      <BehaviorPanel
+        baseline={baseline}
+        deviation={deviation}
+        timeline={behaviorTimeline}
+      />
 
       {showSignal && <PushSignalModal agentId={id} onClose={() => setShowSignal(false)} />}
     </div>

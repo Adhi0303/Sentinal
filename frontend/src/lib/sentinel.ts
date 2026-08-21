@@ -790,3 +790,75 @@ export function trustToken(score: number): string {
   return "deny";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE D — Behavior Monitor
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface BehaviorBaseline {
+  agent_id?: string;
+  baseline_locked: boolean;
+  window_size?: number;
+  samples_needed?: number;
+  message?: string;
+  // When locked:
+  avg_amount?: number;
+  amount_stddev?: number;
+  tool_frequency?: Record<string, number>;
+  top_tools?: string[];
+  avg_call_depth?: number;
+  avg_actions_per_minute?: number;
+  common_accounts?: string[];
+  baseline_sample_size?: number;
+  last_computed?: string;
+}
+
+export interface BehaviorDeviationReport {
+  agent_id: string;
+  timestamp?: string;
+  baseline_locked: boolean;
+  deviation_score: number;
+  severity: "NORMAL" | "MILD" | "MODERATE" | "SEVERE";
+  flags: string[];
+  details?: Record<string, unknown>;
+  trust_signal_emitted: string | null;
+  trust_delta: number;
+  risk_boost: number;
+  message?: string;
+}
+
+export interface BehaviorTimelineEntry {
+  timestamp: string;
+  deviation_score: number;
+  severity: string;
+  flags: string[];
+}
+
+/**
+ * Get the current statistical baseline for an agent.
+ * GET /api/v1/behavior/{agent_id}/baseline
+ */
+export async function fetchBehaviorBaseline(agentId: string): Promise<BehaviorBaseline | null> {
+  return tryApi<BehaviorBaseline>(`/api/v1/behavior/${agentId}/baseline`);
+}
+
+/**
+ * Get the latest deviation report for an agent.
+ * GET /api/v1/behavior/{agent_id}/deviation
+ */
+export async function fetchBehaviorDeviation(agentId: string): Promise<BehaviorDeviationReport | null> {
+  return tryApi<BehaviorDeviationReport>(`/api/v1/behavior/${agentId}/deviation`);
+}
+
+/**
+ * Get the deviation score timeline for chart rendering.
+ * GET /api/v1/behavior/{agent_id}/timeline?limit=N
+ */
+export async function fetchBehaviorTimeline(
+  agentId: string,
+  limit = 100,
+): Promise<BehaviorTimelineEntry[]> {
+  const res = await tryApi<{ agent_id: string; count: number; timeline: BehaviorTimelineEntry[] }>(
+    `/api/v1/behavior/${agentId}/timeline?limit=${limit}`,
+  );
+  return res?.timeline ?? [];
+}

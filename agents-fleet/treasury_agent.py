@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sentinel_sdk import execute_governed_tool
 import requests
+from llm_config import get_llm, GROQ_DEFAULT_MODEL
+from langchain_core.messages import SystemMessage, HumanMessage
 
 BANKING_API = "http://localhost:8000/api/v1"
 AGENT_ID    = "agent_treasury_001"
@@ -33,17 +35,25 @@ def get_balance() -> dict:
     return resp.json()
 
 
-def execute_wire_transfer(to_account: str, amount: float, reference: str) -> dict:
+def execute_wire_transfer(to_account: str, amount: float, reference: str, sweep_context: str = "") -> dict:
     """
     Execute an intraday wire transfer via the Sentinel-governed SDK.
-    The SDK will:
-      1. Check if agent is quarantined (Gate 0)
-      2. Check idempotency (Gate 0.5)
-      3. Validate schema (Gate 2)
-      4. Score risk based on amount (Gate 4) — large amounts = high risk
-      5. Evaluate OPA trading_limits.rego (Gate 5) — may DENY or REQUIRE_HITL
-      6. Only then call the Banking API (Gate 6)
     """
+    print(f"\n[TREASURY AGENT] Powered by {GROQ_DEFAULT_MODEL} (High Accuracy Tool Calling)")
+    llm = get_llm(model=GROQ_DEFAULT_MODEL, temperature=0.1)
+    
+    sys_msg = SystemMessage(content="You are a corporate treasury agent. Review the intraday sweep request and summarize the liquidity impact in 1 short sentence.")
+    usr_msg = HumanMessage(content=f"To Account: {to_account}\nAmount: ${amount:,.2f}\nReference: {reference}\nContext: {sweep_context}")
+    
+    print("  [LLM] Reviewing sweep parameters...")
+    try:
+        analysis_response = llm.invoke([sys_msg, usr_msg])
+        sweep_analysis = analysis_response.content.strip()
+        print(f"  [LLM Analysis] {sweep_analysis}")
+    except Exception as e:
+        print(f"  [LLM Error] {e}")
+        sweep_analysis = reference
+
     return execute_governed_tool(
         agent_id    = AGENT_ID,
         action_type = "WIRE_TRANSFER",
@@ -53,6 +63,7 @@ def execute_wire_transfer(to_account: str, amount: float, reference: str) -> dic
             "amount":       amount,
             "reference":    reference,
             "currency":     "USD",
+            "analysis":     sweep_analysis
         }
     )
 
@@ -77,7 +88,8 @@ def run_demo():
     result1 = execute_wire_transfer(
         to_account = "corp_vendor_aws",
         amount     = 5_000.0,
-        reference  = "ROUTINE-VENDOR-PMT-001"
+        reference  = "ROUTINE-VENDOR-PMT-001",
+        sweep_context = "Routine end-of-week vendor batch payment."
     )
     print(f"  RESULT: {result1.get('status')} | {result1.get('reason', result1.get('message', ''))}")
 
@@ -87,7 +99,8 @@ def run_demo():
     result2 = execute_wire_transfer(
         to_account = "corp_vendor_aws",
         amount     = 30_000.0,
-        reference  = "INTRADAY-SWEEP-002"
+        reference  = "INTRADAY-SWEEP-002",
+        sweep_context = "Mid-day liquidity sweep to cover upcoming regional payroll."
     )
     print(f"  RESULT: {result2.get('status')} | {result2.get('reason', '')}")
 
@@ -97,7 +110,8 @@ def run_demo():
     result3 = execute_wire_transfer(
         to_account = "corp_vendor_aws",
         amount     = 5_000_000.0,
-        reference  = "LARGE-SWEEP-003"
+        reference  = "LARGE-SWEEP-003",
+        sweep_context = "Massive emergency capital movement to offset sudden margin call."
     )
     print(f"  RESULT: {result3.get('status')} | {result3.get('reason', '')}")
 

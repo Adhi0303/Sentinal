@@ -27,17 +27,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sentinel_sdk import execute_governed_tool
 import requests
+from llm_config import get_llm, GROQ_FAST_MODEL
+from langchain_core.messages import SystemMessage, HumanMessage
 
 BANKING_API   = "http://localhost:8000/api/v1"
 AGENT_ID      = "agent_procurement_001"
 SOURCE_ACCOUNT = "corp_treasury_001"   # Amex treasury pays the bills
 
 
-def process_vendor_invoice(vendor_account: str, amount: float, invoice_ref: str) -> dict:
+def process_vendor_invoice(vendor_account: str, amount: float, invoice_ref: str, invoice_details: str = "") -> dict:
     """
     Process a vendor invoice payment via the Sentinel-governed SDK.
     Sentinel checks: quarantine → idempotency → schema → rate → risk → OPA → bank.
     """
+    print(f"\n[PROCUREMENT AGENT] Powered by {GROQ_FAST_MODEL} (High-Speed Parsing)")
+    llm = get_llm(model=GROQ_FAST_MODEL, temperature=0.0)
+    
+    sys_msg = SystemMessage(content="You are a fast invoice parsing agent. Extract the primary line item or purpose of the invoice in 5 words or less.")
+    usr_msg = HumanMessage(content=f"Invoice Ref: {invoice_ref}\nAmount: ${amount}\nDetails: {invoice_details}")
+    
+    print(f"  [LLM] Extracting invoice purpose for {invoice_ref}...")
+    try:
+        parsed_response = llm.invoke([sys_msg, usr_msg])
+        extracted_purpose = parsed_response.content.strip()
+        print(f"  [LLM Extraction] {extracted_purpose}")
+    except Exception as e:
+        print(f"  [LLM Error] {e}")
+        extracted_purpose = invoice_ref
+
     return execute_governed_tool(
         agent_id    = AGENT_ID,
         action_type = "WIRE_TRANSFER",
@@ -47,6 +64,7 @@ def process_vendor_invoice(vendor_account: str, amount: float, invoice_ref: str)
             "amount":       amount,
             "reference":    invoice_ref,
             "currency":     "USD",
+            "purpose":      extracted_purpose
         }
     )
 
@@ -63,7 +81,8 @@ def run_demo():
     result1 = process_vendor_invoice(
         vendor_account = "corp_vendor_aws",
         amount         = 2_500.0,
-        invoice_ref    = "INV-AWS-2026-07-SUPPORT"
+        invoice_ref    = "INV-AWS-2026-07-SUPPORT",
+        invoice_details= "Monthly Enterprise Support Plan"
     )
     print(f"  RESULT: {result1.get('status')} | {result1.get('reason', result1.get('message', ''))}")
 
@@ -73,7 +92,8 @@ def run_demo():
     result2 = process_vendor_invoice(
         vendor_account = "corp_vendor_aws",
         amount         = 12_000.0,
-        invoice_ref    = "INV-AWS-2026-07-COMPUTE"
+        invoice_ref    = "INV-AWS-2026-07-COMPUTE",
+        invoice_details= "EC2 On-Demand Linux Instances and Data Transfer Out"
     )
     print(f"  RESULT: {result2.get('status')} | {result2.get('reason', '')}")
     if result2.get("status") == "REQUIRE_HITL":
@@ -86,7 +106,8 @@ def run_demo():
     result3 = process_vendor_invoice(
         vendor_account = "corp_vendor_aws",
         amount         = 2_500.0,
-        invoice_ref    = "INV-AWS-2026-07-SUPPORT"   # same reference = same idempotency key
+        invoice_ref    = "INV-AWS-2026-07-SUPPORT",  # same reference = same idempotency key
+        invoice_details= "Duplicate submission of Monthly Enterprise Support Plan"
     )
     status3 = result3.get("status")
     print(f"  RESULT: {status3}")

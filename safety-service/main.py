@@ -12,7 +12,7 @@ from risk_scorer import compute_risk_score
 from audit_ledger import append_audit_entry, get_recent_entries, verify_chain_integrity
 from kill_switch import (
     quarantine_agent, quarantine_fleet, release_agent,
-    get_fleet_status, KNOWN_FLEET_AGENTS
+    get_fleet_status, get_known_fleet_agents
 )
 from saga_compensator import compensate_and_clear, compensate_fleet
 from telemetry import get_metrics_output
@@ -34,6 +34,10 @@ from trust_engine import (
 from autonomy_engine import (
     get_autonomy_decision, get_tiers_config, update_tiers_config,
     get_fleet_tier_distribution
+)
+from behavior_monitor import (
+    check_deviation, get_baseline, get_latest_deviation,
+    get_deviation_timeline, get_window_size
 )
 
 BANKING_API_URL = "http://localhost:8000/api/v1"
@@ -306,7 +310,7 @@ async def killswitch_fleet_kill(req: KillSwitchRequest):
     print(f"\n[KILL-SWITCH] FLEET KILL signal received from: {req.triggered_by}")
     result = quarantine_fleet(triggered_by=req.triggered_by)
     # Compensate all in-flight operations across the fleet
-    compensations = compensate_fleet(KNOWN_FLEET_AGENTS, audit_callback=append_audit_entry)
+    compensations = compensate_fleet(get_known_fleet_agents(), audit_callback=append_audit_entry)
     # Write fleet kill event to immutable audit ledger
     _audit_kill_event("FLEET", "FLEET_QUARANTINED", {
         "triggered_by":      req.triggered_by,
@@ -858,6 +862,91 @@ async def autonomy_update_tiers(req: AutonomyTiersRequest):
 async def autonomy_fleet_distribution():
     """Return count of active agents in each autonomy tier. Used by dashboard KPIs."""
     return get_fleet_tier_distribution()
+
+
+# ============================================================================
+# MODULE D: BEHAVIOR MONITOR ENDPOINTS
+# ============================================================================
+
+class BehaviorCheckRequest(BaseModel):
+    amount: float
+    tool_name: str
+    account_id: str
+    call_depth: Optional[int] = 1
+    tx_limit: Optional[float] = 10000.0
+
+
+@app.post("/api/v1/behavior/{agent_id}/check")
+async def behavior_check(agent_id: str, req: BehaviorCheckRequest):
+    """
+    Module D.2: Deviation Detector — called by the SDK on every agent action.
+    Records the action, checks against baseline, returns deviation report.
+    Automatically emits trust signals and computes risk_boost if anomaly detected.
+    """
+    agent = get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return check_deviation(
+        agent_id=agent_id,
+        amount=req.amount,
+        tool_name=req.tool_name,
+        account_id=req.account_id,
+        call_depth=req.call_depth or 1,
+        tx_limit=req.tx_limit or agent.get("financial_limit_per_tx", 10000.0),
+    )
+
+
+@app.get("/api/v1/behavior/{agent_id}/baseline")
+async def behavior_get_baseline(agent_id: str):
+    """
+    Module D.1: Return the current statistical baseline for an agent.
+    Returns window_size and samples_needed if baseline is not yet established.
+    """
+    baseline = get_baseline(agent_id)
+    if baseline:
+        return baseline
+    window_size = get_window_size(agent_id)
+    return {
+        "agent_id":        agent_id,
+        "baseline_locked": False,
+        "window_size":     window_size,
+        "samples_needed":  max(0, 10 - window_size),
+        "message":         f"Baseline not yet established. {max(0, 10 - window_size)} more actions needed.",
+    }
+
+
+@app.get("/api/v1/behavior/{agent_id}/deviation")
+async def behavior_get_deviation(agent_id: str):
+    """
+    Module D.2: Return the most recent deviation report for an agent.
+    """
+    report = get_latest_deviation(agent_id)
+    if not report:
+        return {
+            "agent_id":        agent_id,
+            "deviation_score": 0,
+            "severity":        "NORMAL",
+            "flags":           [],
+            "message":         "No deviation data yet. Fire some actions first.",
+        }
+    return report
+
+
+@app.get("/api/v1/behavior/{agent_id}/timeline")
+async def behavior_get_timeline(
+    agent_id: str,
+    limit: int = Query(default=100, le=200),
+):
+    """
+    Module D.2: Return the deviation score history for chart rendering.
+    Returns newest-first list of { timestamp, deviation_score, severity, flags }.
+    """
+    timeline = get_deviation_timeline(agent_id, limit=limit)
+    return {
+        "agent_id":  agent_id,
+        "count":     len(timeline),
+        "timeline":  timeline,
+    }
 
 
 if __name__ == "__main__":

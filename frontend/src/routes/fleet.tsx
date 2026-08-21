@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Zap } from "lucide-react";
@@ -30,6 +30,7 @@ export const Route = createFileRoute("/fleet")({
 
 function FleetPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { data: agents = [] } = useQuery({
     queryKey: ["fleet"],
     queryFn: fetchFleet,
@@ -123,7 +124,10 @@ function FleetPage() {
                      Quarantine
                   </button>
                 )}
-                <button className="rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-link hover:bg-accent">
+                <button
+                  onClick={() => navigate({ to: "/agents_/$id", params: { id: a.agent_id } })}
+                  className="rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-link hover:bg-accent"
+                >
                    Details
                 </button>
               </div>

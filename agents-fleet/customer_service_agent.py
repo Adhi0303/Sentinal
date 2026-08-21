@@ -2,12 +2,13 @@
 Customer Service Agent - Powered by LangChain + Groq + Pinecone RAG
 Includes Sentinel Module 2, 3, and 4 Protections.
 Module 3: Agent now INVESTIGATES before acting using 3 new tools.
+
+LLM: Uses shared llm_config.py -> meta-llama/llama-4-maverick-17b-128e-instruct
+     Model and API key are loaded from agents-fleet/.env automatically.
 """
 import os
 import sys
 import json
-from dotenv import load_dotenv
-from langchain_groq import ChatGroq
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from sentinel_sdk import (
@@ -19,13 +20,11 @@ from sentinel_sdk import (
     check_waiver_eligibility_tool,
     start_agent_trace
 )
+from llm_config import get_llm_with_tools, GROQ_DEFAULT_MODEL
 
 # Make rag_pipeline importable from the safety-service directory
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'safety-service'))
-from rag_pipeline import get_retriever # type: ignore
-
-load_dotenv()
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+from rag_pipeline import get_retriever  # type: ignore
 
 # Global trace_id — set fresh per agent run so graph tracker can track the chain
 _current_trace_id = None
@@ -90,8 +89,9 @@ def waive_customer_fee(account_id: str, amount: float, reason: str) -> str:
 tools = [get_account_details, get_transaction_history, check_waiver_eligibility, waive_customer_fee]
 tools_by_name = {t.name: t for t in tools}
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0)
-llm_with_tools = llm.bind_tools(tools)
+# LLM initialized from shared config — model & key loaded from agents-fleet/.env
+llm_with_tools = get_llm_with_tools(tools)
+print(f"[CUSTOMER SERVICE AGENT] LLM: {GROQ_DEFAULT_MODEL} via Groq")
 
 SYSTEM_PROMPT = """You are a diligent and professional American Express Customer Service AI Agent.
 Your purpose is to assist customers with their account inquiries, including fee waivers.

@@ -21,6 +21,21 @@ from splunk_forwarder import load_config as splunk_load, update_config as splunk
 import os
 import requests as http_requests
 
+# ── Phase 1: Control Plane Modules (Razorpay Pivot) ──────────────────────────
+from agent_registry import (
+    register_agent, get_agent, list_agents,
+    update_agent_status, update_agent_config, check_tool_allowed
+)
+from trust_engine import (
+    initialize_trust, get_trust, set_trust,
+    update_trust, get_trust_history, get_trust_summary,
+    get_weights, update_weights
+)
+from autonomy_engine import (
+    get_autonomy_decision, get_tiers_config, update_tiers_config,
+    get_fleet_tier_distribution
+)
+
 BANKING_API_URL = "http://localhost:8000/api/v1"
 
 app = FastAPI(title="Sentinel Safety Service — Modules 2, 3, 4, 5, 6, 7 | 2PC Enabled")
@@ -652,6 +667,197 @@ async def test_splunk_connection():
     """
     result = splunk_test()
     return result
+
+
+# ============================================================================
+# MODULE A: AGENT REGISTRY ENDPOINTS
+# ============================================================================
+
+class AgentRegisterRequest(BaseModel):
+    name: str
+    owner: str
+    purpose: str
+    allowed_tools: List[str]
+    blocked_tools: Optional[List[str]] = []
+    financial_limit_per_tx: float
+    daily_budget: float
+    model: Optional[str] = "gpt-4o"
+    created_by: Optional[str] = "admin"
+    agent_id: Optional[str] = None
+
+class AgentStatusRequest(BaseModel):
+    new_status: str
+    changed_by: Optional[str] = "admin"
+
+class AgentConfigUpdateRequest(BaseModel):
+    updates: Dict[str, Any]
+
+
+@app.post("/api/v1/agents/register")
+async def agents_register(req: AgentRegisterRequest):
+    """
+    Register a new agent with Sentinel.
+    Auto-initializes trust=100.0 and autonomy_tier=FULL.
+    """
+    try:
+        agent = register_agent(
+            name=req.name, owner=req.owner, purpose=req.purpose,
+            allowed_tools=req.allowed_tools, blocked_tools=req.blocked_tools,
+            financial_limit_per_tx=req.financial_limit_per_tx,
+            daily_budget=req.daily_budget, model=req.model,
+            created_by=req.created_by, agent_id=req.agent_id,
+        )
+        initialize_trust(agent["agent_id"])
+        agent["trust_score"]   = get_trust(agent["agent_id"])
+        agent["autonomy_tier"] = get_autonomy_decision(agent["agent_id"])["tier"]
+        return agent
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/agents")
+async def agents_list(
+    status: Optional[str] = None,
+    owner:  Optional[str] = None,
+):
+    """
+    List all registered agents with live trust score + autonomy tier.
+    Filter by ?status=ACTIVE or ?owner=ZoopCart.
+    """
+    agents = list_agents(status=status, owner=owner)
+    for a in agents:
+        a["trust_score"]   = get_trust(a["agent_id"])
+        a["autonomy_tier"] = get_autonomy_decision(a["agent_id"])["tier"]
+    fleet_dist = get_fleet_tier_distribution()
+    return {"agents": agents, "count": len(agents), "fleet_distribution": fleet_dist}
+
+
+@app.get("/api/v1/agents/{agent_id}")
+async def agents_get(agent_id: str):
+    """Get a single agent with live trust score and full autonomy decision."""
+    agent = get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent["trust_score"]       = get_trust(agent_id)
+    agent["autonomy_decision"] = get_autonomy_decision(agent_id)
+    agent["autonomy_tier"]     = agent["autonomy_decision"]["tier"]
+    return agent
+
+
+@app.post("/api/v1/agents/{agent_id}/status")
+async def agents_update_status(agent_id: str, req: AgentStatusRequest):
+    """
+    Transition agent lifecycle state.
+    Recovery from quarantine (→ ACTIVE when trust < 50) auto-resets trust to 50.
+    """
+    try:
+        updated = update_agent_status(agent_id, req.new_status, req.changed_by)
+        result = {"agent": updated}
+        if req.new_status == "ACTIVE" and get_trust(agent_id) < 50:
+            set_trust(agent_id, 50.0)
+            result["trust_reset_to"] = 50.0
+            result["note"] = "Trust reset to 50.0 on recovery — agent must re-earn autonomy"
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/v1/agents/{agent_id}")
+async def agents_update_config(agent_id: str, req: AgentConfigUpdateRequest):
+    """Update mutable agent config (tools, limits, model, name, purpose)."""
+    try:
+        return update_agent_config(agent_id, req.updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============================================================================
+# MODULE B: TRUST ENGINE ENDPOINTS
+# ============================================================================
+
+class TrustSignalRequest(BaseModel):
+    signal_event: str
+    reason: Optional[str] = ""
+
+class TrustWeightsRequest(BaseModel):
+    weights: Dict[str, float]
+
+
+@app.get("/api/v1/trust/{agent_id}")
+async def trust_get(agent_id: str):
+    """Get current trust score, autonomy tier, and trend for an agent."""
+    return get_trust_summary(agent_id)
+
+
+@app.get("/api/v1/trust/{agent_id}/history")
+async def trust_history(
+    agent_id: str,
+    limit: int = Query(default=100, le=500),
+):
+    """Get trust event timeline (newest-first) for chart rendering."""
+    return {"agent_id": agent_id, "history": get_trust_history(agent_id, limit)}
+
+
+@app.post("/api/v1/trust/{agent_id}/signal")
+async def trust_push_signal(agent_id: str, req: TrustSignalRequest):
+    """
+    Push a trust signal for an agent.
+    Called by the SDK after every gate outcome.
+    Can also be used by admins for manual overrides.
+    """
+    if not get_agent(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return update_trust(agent_id, req.signal_event, req.reason)
+
+
+@app.get("/api/v1/trust/weights")
+async def trust_get_weights():
+    """Return current signal weight table."""
+    return {"weights": get_weights()}
+
+
+@app.put("/api/v1/trust/weights")
+async def trust_update_weights(req: TrustWeightsRequest):
+    """Update one or more signal weights (admin operation)."""
+    return {"weights": update_weights(req.weights)}
+
+
+# ============================================================================
+# MODULE C: AUTONOMY ENGINE ENDPOINTS
+# ============================================================================
+
+class AutonomyTiersRequest(BaseModel):
+    tiers: Dict[str, float]
+
+
+@app.get("/api/v1/autonomy/{agent_id}")
+async def autonomy_get(
+    agent_id: str,
+    risk_score: int = Query(default=0, ge=0, le=100),
+):
+    """
+    Get the current autonomy decision for an agent.
+    Pass ?risk_score=N to get a decision that factors in the action risk level.
+    """
+    return get_autonomy_decision(agent_id, risk_score)
+
+
+@app.get("/api/v1/autonomy/tiers")
+async def autonomy_get_tiers():
+    """Return current tier threshold configuration."""
+    return {"tiers": get_tiers_config()}
+
+
+@app.put("/api/v1/autonomy/tiers")
+async def autonomy_update_tiers(req: AutonomyTiersRequest):
+    """Update tier thresholds (admin operation)."""
+    return {"tiers": update_tiers_config(req.tiers)}
+
+
+@app.get("/api/v1/autonomy/fleet/distribution")
+async def autonomy_fleet_distribution():
+    """Return count of active agents in each autonomy tier. Used by dashboard KPIs."""
+    return get_fleet_tier_distribution()
 
 
 if __name__ == "__main__":

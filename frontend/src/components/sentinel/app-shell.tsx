@@ -1,6 +1,7 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
+  Bot,
   ClipboardCheck,
   Cpu,
   FileBarChart,
@@ -35,6 +36,7 @@ const ADMIN_NAV: Array<{
   { to: "/traffic", label: "Live Traffic", icon: Activity },
   { to: "/hitl", label: "HITL Queue", icon: ClipboardCheck, badge: true },
   { to: "/fleet", label: "Agent Fleet", icon: Cpu },
+  { to: "/agents", label: "Agent Registry", icon: Bot },
   { to: "/policy", label: "Policy Engine", icon: Scale },
   { to: "/audit", label: "Audit Ledger", icon: ShieldCheck },
   { to: "/report", label: "Compliance Report", icon: FileBarChart },

@@ -567,3 +567,226 @@ export function riskBand(score: number | null) {
   if (score >= 25)   return { label: "MEDIUM",    token: "info" };
   return               { label: "LOW",       token: "allow" };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1 CONTROL PLANE — Agent Registry / Trust Engine / Autonomy Engine
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export type AutonomyTier = "FULL" | "BOUNDED" | "HITL" | "QUARANTINE";
+export type AgentLifecycle = "ACTIVE" | "SUSPENDED" | "QUARANTINED" | "RETIRED";
+
+/** Full agent profile from GET /api/v1/agents or GET /api/v1/agents/{id}. */
+export interface RegistryAgent {
+  agent_id: string;
+  name: string;
+  owner: string;
+  purpose: string;
+  allowed_tools: string[];
+  blocked_tools: string[];
+  model: string;
+  financial_limit_per_tx: number;
+  daily_budget: number;
+  status: AgentLifecycle;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  // Enriched by API
+  trust_score: number;
+  autonomy_tier: AutonomyTier;
+  // Present only on single-agent GET
+  autonomy_decision?: AutonomyDecision;
+}
+
+/** Individual trust event from GET /api/v1/trust/{id}/history */
+export interface TrustEvent {
+  timestamp: string;
+  signal_event: string;
+  delta: number;
+  old_score: number;
+  new_score: number;
+  reason: string;
+}
+
+/** Response from GET /api/v1/trust/{agent_id} */
+export interface TrustSummary {
+  agent_id: string;
+  trust_score: number;
+  autonomy_tier: AutonomyTier;
+  trend: string;       // "improving" | "declining" | "stable"
+  last_updated: string;
+  events_24h: number;
+}
+
+/** Response from GET /api/v1/autonomy/{agent_id} */
+export interface AutonomyDecision {
+  agent_id: string;
+  trust_score: number;
+  risk_score: number;
+  tier: AutonomyTier;
+  requires_hitl: boolean;
+  blocked: boolean;
+  limits_override: Record<string, number>;
+  reason: string;
+}
+
+/** Response from GET /api/v1/autonomy/fleet/distribution */
+export interface FleetDistribution {
+  FULL: number;
+  BOUNDED: number;
+  HITL: number;
+  QUARANTINE: number;
+  total_active: number;
+  fleet_avg_trust: number;
+}
+
+/** Payload for POST /api/v1/agents/register */
+export interface RegisterAgentPayload {
+  name: string;
+  owner: string;
+  purpose: string;
+  allowed_tools: string[];
+  blocked_tools: string[];
+  financial_limit_per_tx: number;
+  daily_budget: number;
+  model?: string;
+  created_by?: string;
+  agent_id?: string;
+}
+
+// ── API functions ────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all registered agents with live trust + autonomy tier.
+ * GET /api/v1/agents?status=&owner=
+ */
+export async function fetchRegistryAgents(
+  status?: string,
+  owner?: string,
+): Promise<{ agents: RegistryAgent[]; count: number; fleet_distribution: FleetDistribution } | null> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (owner)  params.set("owner", owner);
+  const qs = params.toString() ? `?${params}` : "";
+  return tryApi<{ agents: RegistryAgent[]; count: number; fleet_distribution: FleetDistribution }>(
+    `/api/v1/agents${qs}`,
+  );
+}
+
+/**
+ * Fetch a single agent with full autonomy decision.
+ * GET /api/v1/agents/{id}
+ */
+export async function fetchRegistryAgent(agentId: string): Promise<RegistryAgent | null> {
+  return tryApi<RegistryAgent>(`/api/v1/agents/${agentId}`);
+}
+
+/**
+ * Register a new agent with Sentinel.
+ * POST /api/v1/agents/register
+ */
+export async function registerNewAgent(payload: RegisterAgentPayload): Promise<RegistryAgent | null> {
+  return tryApi<RegistryAgent>(`/api/v1/agents/register`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Transition agent lifecycle state (ACTIVE | SUSPENDED | QUARANTINED | RETIRED).
+ * POST /api/v1/agents/{id}/status
+ */
+export async function updateAgentLifecycle(
+  agentId: string,
+  newStatus: AgentLifecycle,
+  changedBy = "admin",
+): Promise<{ agent: RegistryAgent; trust_reset_to?: number } | null> {
+  return tryApi(`/api/v1/agents/${agentId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ new_status: newStatus, changed_by: changedBy }),
+  });
+}
+
+/**
+ * Get trust score, tier, and trend for an agent.
+ * GET /api/v1/trust/{agent_id}
+ */
+export async function fetchTrustSummary(agentId: string): Promise<TrustSummary | null> {
+  return tryApi<TrustSummary>(`/api/v1/trust/${agentId}`);
+}
+
+/**
+ * Get trust event history (newest-first).
+ * GET /api/v1/trust/{agent_id}/history?limit=N
+ */
+export async function fetchTrustHistory(
+  agentId: string,
+  limit = 100,
+): Promise<TrustEvent[]> {
+  const res = await tryApi<{ agent_id: string; history: TrustEvent[] }>(
+    `/api/v1/trust/${agentId}/history?limit=${limit}`,
+  );
+  return res?.history ?? [];
+}
+
+/**
+ * Push a trust signal manually (admin override).
+ * POST /api/v1/trust/{agent_id}/signal
+ */
+export async function pushTrustSignal(
+  agentId: string,
+  signalEvent: string,
+  reason = "",
+): Promise<Record<string, unknown> | null> {
+  return tryApi(`/api/v1/trust/${agentId}/signal`, {
+    method: "POST",
+    body: JSON.stringify({ signal_event: signalEvent, reason }),
+  });
+}
+
+/**
+ * Get fleet-wide tier distribution + avg trust for dashboard KPIs.
+ * GET /api/v1/autonomy/fleet/distribution
+ */
+export async function fetchFleetDistribution(): Promise<FleetDistribution | null> {
+  return tryApi<FleetDistribution>(`/api/v1/autonomy/fleet/distribution`);
+}
+
+/**
+ * Get autonomy decision for a specific agent.
+ * GET /api/v1/autonomy/{agent_id}?risk_score=N
+ */
+export async function fetchAutonomyDecision(
+  agentId: string,
+  riskScore = 0,
+): Promise<AutonomyDecision | null> {
+  return tryApi<AutonomyDecision>(`/api/v1/autonomy/${agentId}?risk_score=${riskScore}`);
+}
+
+// ── Trust display helpers ────────────────────────────────────────────────────
+
+/** Map autonomy tier → CSS token for StatusPill. */
+export const TIER_TOKEN: Record<AutonomyTier, string> = {
+  FULL:       "allow",
+  BOUNDED:    "hitl",   // amber
+  HITL:       "duplicate",
+  QUARANTINE: "deny",
+};
+
+/** Map autonomy tier → label. */
+export const TIER_LABEL: Record<AutonomyTier, string> = {
+  FULL:       "FULL",
+  BOUNDED:    "BOUNDED",
+  HITL:       "NEEDS APPROVAL",
+  QUARANTINE: "QUARANTINED",
+};
+
+/** Color-code a trust score 0–100 to a CSS token. */
+export function trustToken(score: number): string {
+  if (score >= 90) return "allow";
+  if (score >= 70) return "hitl";    // amber
+  if (score >= 40) return "duplicate"; // orange
+  return "deny";
+}
+

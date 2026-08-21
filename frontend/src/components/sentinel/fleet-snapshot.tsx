@@ -1,13 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+﻿import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { fetchFleet, fetchRecent } from "@/lib/sentinel";
+import { fetchRegistryAgents, fetchRecent, TIER_TOKEN, TIER_LABEL } from "@/lib/sentinel";
+import { StatusPill } from "./primitives";
+import { TrustScoreBadge } from "./autonomy-badge";
 
 export function FleetSnapshot() {
-  const { data: fleet = [] } = useQuery({
-    queryKey: ["fleet"],
-    queryFn: fetchFleet,
+  // Prefer registry API (new, has trust data); fall back gracefully
+  const { data: registryData } = useQuery({
+    queryKey: ["registryAgents"],
+    queryFn: () => fetchRegistryAgents(),
     refetchInterval: 10_000,
   });
   const { data: entries = [] } = useQuery({
@@ -16,6 +19,7 @@ export function FleetSnapshot() {
     refetchInterval: 5000,
   });
 
+  const fleet = registryData?.agents ?? [];
   const active = fleet.filter((a) => a.status === "ACTIVE").length;
   const quarantined = fleet.filter((a) => a.status === "QUARANTINED").length;
   const avgRisk =
@@ -48,14 +52,31 @@ export function FleetSnapshot() {
 
       <ul className="flex-1 space-y-2">
         {fleet.slice(0, 5).map((a) => (
-          <li key={a.agent_id} className="flex items-center gap-4 py-2 px-3 hover:bg-white/5 rounded-[12px] transition-colors">
-            <div className={`grid size-8 place-items-center rounded-full shadow-inner ${a.status === 'ACTIVE' ? 'bg-[#578d72]/20 text-[#578d72]' : 'bg-[#b06266]/20 text-[#b06266]'}`}>
-              {a.status === 'ACTIVE' ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+          <li key={a.agent_id} className="flex flex-col py-2 px-3 hover:bg-white/5 rounded-[12px] transition-colors">
+            <div className="flex items-center gap-3">
+              <div
+                className={`grid size-8 shrink-0 place-items-center rounded-full shadow-inner ${
+                  a.status === "ACTIVE" ? "bg-[#578d72]/20 text-[#578d72]" : "bg-[#b06266]/20 text-[#b06266]"
+                }`}
+              >
+                {a.status === "ACTIVE" ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="block truncate text-[14px] font-medium text-white/90">{a.name}</span>
+                <span className="block truncate text-[11px] text-white/50">{a.owner}</span>
+              </div>
+              {/* Autonomy tier pill */}
+              <StatusPill
+                token={TIER_TOKEN[a.autonomy_tier] ?? "info"}
+                className="text-[10px] shrink-0"
+              >
+                {TIER_LABEL[a.autonomy_tier] ?? a.autonomy_tier}
+              </StatusPill>
             </div>
-            <span className="text-[14px] font-medium text-white/90">{a.name}</span>
-            <span className="mono ml-auto text-[12px] text-white/50">
-              {a.requests_today} req
-            </span>
+            {/* Trust score bar */}
+            <div className="mt-2 ml-11">
+              <TrustScoreBadge score={a.trust_score} />
+            </div>
           </li>
         ))}
       </ul>
@@ -66,10 +87,10 @@ export function FleetSnapshot() {
           <span className="text-[13px] text-white/70">Hash chain intact</span>
         </div>
         <Link
-          to="/fleet"
+          to="/agents"
           className="bg-white/10 hover:bg-white/20 text-white rounded-full px-5 py-2 text-[13px] transition-colors backdrop-blur-sm"
         >
-          Manage fleet
+          Manage agents
         </Link>
       </div>
     </section>

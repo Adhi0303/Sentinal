@@ -236,6 +236,89 @@ def _clear_in_flight(agent_id: str):
     redis_client.delete(f"saga:in-flight:{agent_id}")
 
 
+# ============================================================
+# PHASE 1: CONTROL PLANE GATE HELPERS (Razorpay Pivot)
+# ============================================================
+
+def _check_registry(agent_id: str) -> dict:
+    """
+    Gate 0.1: Verify the agent is registered in Sentinel and not suspended/retired.
+    Fails OPEN if the registry endpoint is unreachable (availability > security here,
+    since the remaining 7 gates still apply).
+    """
+    try:
+        resp = requests.get(
+            f"{SAFETY_SERVICE_URL}/agents/{agent_id}",
+            timeout=3
+        )
+        if resp.status_code == 404:
+            return {
+                "status": "DENIED",
+                "reason": f"Agent '{agent_id}' is not registered in the Sentinel registry. Register before executing actions."
+            }
+        agent = resp.json()
+        status = agent.get("status", "UNKNOWN")
+        if status in ("SUSPENDED", "RETIRED"):
+            return {
+                "status": "DENIED",
+                "reason": f"Agent '{agent_id}' is {status} and cannot execute actions. Contact admin."
+            }
+        return {"status": "PASS", "reason": f"Agent verified: '{agent.get('name')}' (status={status})"}
+    except Exception as e:
+        print(f"[SDK] Gate 0.1 Registry check error (failing open): {e}")
+        return {"status": "PASS", "reason": "Registry unreachable — failing open"}
+
+
+def _check_autonomy(agent_id: str) -> dict:
+    """
+    Gate 0.2: Get the agent's autonomy tier and apply any limits.
+    QUARANTINE tier → hard block (fail closed).
+    HITL tier       → sets force_hitl flag for downstream gate.
+    BOUNDED tier    → attaches limits_override for velocity/amount gates.
+    Fails OPEN for FULL/BOUNDED/HITL on network error (existing 7 gates still protect).
+    """
+    try:
+        resp = requests.get(
+            f"{SAFETY_SERVICE_URL}/autonomy/{agent_id}",
+            timeout=3
+        )
+        decision = resp.json()
+        tier = decision.get("tier", "FULL")
+
+        if decision.get("blocked"):
+            return {
+                "status": "DENIED",
+                "tier":   tier,
+                "reason": decision.get("reason", "Agent quarantined")
+            }
+        return {
+            "status":          "PASS",
+            "tier":            tier,
+            "requires_hitl":   decision.get("requires_hitl", False),
+            "limits_override": decision.get("limits_override", {}),
+            "reason":          decision.get("reason", ""),
+        }
+    except Exception as e:
+        print(f"[SDK] Gate 0.2 Autonomy check error (failing open): {e}")
+        return {"status": "PASS", "tier": "FULL", "requires_hitl": False, "limits_override": {}}
+
+
+def _send_trust_feedback(agent_id: str, signal_event: str, reason: str = ""):
+    """
+    Non-blocking trust signal push after every gate outcome.
+    Called after the action completes (or fails) — never blocks the action.
+    """
+    try:
+        requests.post(
+            f"{SAFETY_SERVICE_URL}/trust/{agent_id}/signal",
+            json={"signal_event": signal_event, "reason": reason},
+            timeout=2
+        )
+    except Exception:
+        pass  # Trust feedback is never allowed to fail an action
+
+
+
 def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, trace_id: str = None):
     """
     The Sentinel Interceptor — sits between the Agent and the Bank.
@@ -243,6 +326,24 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     Every decision is automatically written to the cryptographic audit ledger (Module 5).
     """
     print(f"\n[SENTINEL INTERCEPTOR] Intercepted tool call from {agent_id}: {action_type}")
+
+    # ── Gate 0.1: Registry Check ────────────────────────────────────────────────
+    registry_result = _check_registry(agent_id)
+    print(f"[SENTINEL] Gate 0.1 Registry  : {registry_result['status']} | {registry_result['reason']}")
+    if registry_result["status"] == "DENIED":
+        _audit_log(agent_id, action_type, "DENIED", registry_result["reason"], parameters)
+        return {"status": "DENIED", "reason": registry_result["reason"], "gate": "REGISTRY_CHECK"}
+
+    # ── Gate 0.2: Autonomy Tier Check ──────────────────────────────────────────
+    autonomy_result = _check_autonomy(agent_id)
+    print(f"[SENTINEL] Gate 0.2 Autonomy  : {autonomy_result['status']} | tier={autonomy_result.get('tier')} | hitl={autonomy_result.get('requires_hitl')}")
+    if autonomy_result["status"] == "DENIED":
+        _send_trust_feedback(agent_id, "CAPABILITY_VIOLATION", "Quarantined agent attempted to execute action")
+        _audit_log(agent_id, action_type, "DENIED", autonomy_result["reason"], parameters)
+        return {"status": "DENIED", "reason": autonomy_result["reason"], "gate": "AUTONOMY_CHECK"}
+    # Carry HITL flag and limits forward into downstream gates
+    force_hitl_from_autonomy = autonomy_result.get("requires_hitl", False)
+    autonomy_limits          = autonomy_result.get("limits_override", {})
 
     # GATE 0: Quarantine Check (Module 6.2) — reads Redis directly, sub-millisecond, no HTTP
     quarantine_state = check_quarantine_status(agent_id)
@@ -467,10 +568,12 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
         _clear_in_flight(agent_id)                          # Module 6.3: clear in-flight on success
         store_result(idem_key, result, "ALLOWED")           # Module 5.2: cache result for future duplicates
         _audit_log(agent_id, action_type, "ALLOWED", "OPA approved. Request forwarded to Banking API.", parameters, risk_score)
+        _send_trust_feedback(agent_id, "ACTION_ALLOWED", f"'{action_type}' completed successfully via Banking API")
         return result
 
     except Exception as e:
         _clear_in_flight(agent_id)
         clear_processing(idem_key)  # Module 5.2: clear processing marker on error (allow retry)
         _audit_log(agent_id, action_type, "ERROR", str(e), parameters, risk_score)
+        _send_trust_feedback(agent_id, "SAGA_ROLLBACK_TRIGGERED", f"Banking API exception: {str(e)[:80]}")
         return {"status": "ERROR", "reason": str(e)}

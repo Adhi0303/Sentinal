@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight } from "lucide-react";
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
-import { fetchRecent } from "@/lib/sentinel";
+import { fetchRecent, fetchFleetDistribution, trustToken } from "@/lib/sentinel";
 
 function Arc({ pct }: { pct: number }) {
   const r = 92;
@@ -53,6 +53,12 @@ export function OverviewHero() {
   const { data: entries = [] } = useQuery({
     queryKey: ["recent", 200],
     queryFn: () => fetchRecent(200),
+    refetchInterval: 15_000,
+  });
+
+  const { data: fleetDist } = useQuery({
+    queryKey: ["fleetDistribution"],
+    queryFn: fetchFleetDistribution,
     refetchInterval: 15_000,
   });
 
@@ -136,6 +142,68 @@ export function OverviewHero() {
           </div>
         ))}
       </div>
+
+      {/* Trust KPI strip — powered by Module A/B/C */}
+      {fleetDist && (
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          {/* Fleet Avg Trust */}
+          <div className="glass-chip rounded-[20px] p-5 hover-lift">
+            <p className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground mb-3">Fleet Avg Trust</p>
+            <div className="flex items-baseline gap-2">
+              <p
+                className="text-[32px] leading-none font-light tracking-[-0.02em]"
+                style={{ color: `var(--${trustToken(fleetDist.fleet_avg_trust ?? 100)})` }}
+              >
+                {(fleetDist.fleet_avg_trust ?? 100).toFixed(1)}
+              </p>
+              <span className="text-[14px] text-muted-foreground">/ 100</span>
+            </div>
+            <div className="mt-3 h-1.5 w-full rounded-full bg-white/20 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{
+                  width: `${fleetDist.fleet_avg_trust ?? 100}%`,
+                  backgroundColor: `var(--${trustToken(fleetDist.fleet_avg_trust ?? 100)})`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Agents in HITL */}
+          <div className="glass-chip rounded-[20px] p-5 hover-lift">
+            <p className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground mb-3">Agents in HITL</p>
+            <div className="flex items-baseline gap-2">
+              <p
+                className="text-[32px] leading-none font-light tracking-[-0.02em]"
+                style={{ color: fleetDist.HITL > 0 ? "var(--hitl)" : "var(--allow)" }}
+              >
+                {fleetDist.HITL}
+              </p>
+              <span className="text-[14px] text-muted-foreground">of {fleetDist.total_active}</span>
+            </div>
+            <p className="mt-2 text-[12px] text-muted-foreground">
+              {fleetDist.BOUNDED} bounded · {fleetDist.FULL} full autonomy
+            </p>
+          </div>
+
+          {/* Agents Quarantined */}
+          <div className="glass-chip rounded-[20px] p-5 hover-lift">
+            <p className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground mb-3">Quarantined</p>
+            <div className="flex items-baseline gap-2">
+              <p
+                className="text-[32px] leading-none font-light tracking-[-0.02em]"
+                style={{ color: fleetDist.QUARANTINE > 0 ? "var(--deny)" : "var(--allow)" }}
+              >
+                {fleetDist.QUARANTINE}
+              </p>
+              <span className="text-[14px] text-muted-foreground">agents</span>
+            </div>
+            <p className="mt-2 text-[12px]" style={{ color: fleetDist.QUARANTINE > 0 ? "var(--deny)" : "var(--allow)" }}>
+              {fleetDist.QUARANTINE > 0 ? "Intervention required" : "All agents healthy"}
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

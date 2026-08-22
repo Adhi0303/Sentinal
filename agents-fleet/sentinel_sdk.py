@@ -386,6 +386,55 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
         return {"status": "BLOCKED", "reason": reason}
     print(f"[SENTINEL] Gate 0: PASSED (agent state=ACTIVE)")
 
+    # ── Read-Only Fast-Path (Razorpay GET tools) ─────────────────────────────
+    # These read-only investigation tools pass Gate 0.1 (registry) and Gate 0 (quarantine)
+    # above, but skip velocity limits, OPA policy, risk scoring, and idempotency
+    # since they do not mutate any financial state.
+    READ_ONLY_ACTIONS = {
+        "GET_PAYMENT",
+        "GET_ORDER",
+        "GET_BALANCE",
+        "GET_SETTLEMENT",
+        "GET_TRANSACTIONS",
+    }
+    if action_type in READ_ONLY_ACTIONS:
+        try:
+            if action_type == "GET_PAYMENT":
+                payment_id = parameters.get("payment_id")
+                if not payment_id:
+                    return {"status": "DENIED", "reason": "GET_PAYMENT requires 'payment_id' parameter"}
+                resp = requests.get(f"{BANKING_API_URL}/payments/{payment_id}", timeout=5)
+                result = resp.json()
+
+            elif action_type == "GET_ORDER":
+                order_id = parameters.get("order_id")
+                if not order_id:
+                    return {"status": "DENIED", "reason": "GET_ORDER requires 'order_id' parameter"}
+                resp = requests.get(f"{BANKING_API_URL}/orders/{order_id}", timeout=5)
+                result = resp.json()
+
+            elif action_type == "GET_BALANCE":
+                merchant_id = parameters.get("merchant_id")
+                if not merchant_id:
+                    return {"status": "DENIED", "reason": "GET_BALANCE requires 'merchant_id' parameter"}
+                resp = requests.get(f"{BANKING_API_URL}/merchants/{merchant_id}/balance", timeout=5)
+                result = resp.json()
+
+            elif action_type in ("GET_SETTLEMENT", "GET_TRANSACTIONS"):
+                merchant_id = parameters.get("merchant_id")
+                if not merchant_id:
+                    return {"status": "DENIED", "reason": f"{action_type} requires 'merchant_id' parameter"}
+                resp = requests.get(f"{BANKING_API_URL}/merchants/{merchant_id}/transactions", timeout=5)
+                result = resp.json()
+
+            _audit_log(agent_id, action_type, "ALLOWED", "Read-only lookup — no gate required.", parameters)
+            _send_trust_feedback(agent_id, "ACTION_ALLOWED", f"'{action_type}' read-only lookup completed")
+            return {"status": "SUCCESS", **result}
+
+        except Exception as e:
+            _audit_log(agent_id, action_type, "ERROR", str(e), parameters)
+            return {"status": "ERROR", "reason": str(e)}
+
     # GATE 0.5: Idempotency Check (Module 5.2) — sub-millisecond Redis lookup
     idem_key = generate_idempotency_key(agent_id, action_type, parameters)
     is_dup, cached = check_duplicate(idem_key)
@@ -452,7 +501,7 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     print("[SENTINEL] Deep Parameter Validation: PASSED")
 
     # 2. Redis Rate Limiting (Module 0.2) — applied to all financial write actions
-    if action_type in ("FEE_WAIVER", "WIRE_TRANSFER", "CREDIT_LIMIT_INCREASE"):
+    if action_type in ("FEE_WAIVER", "WIRE_TRANSFER", "CREDIT_LIMIT_INCREASE", "REFUND", "PAYOUT", "PAYMENT_CAPTURE"):
         import time
         now_ms = int(time.time() * 1000)
         amount = parameters.get("amount", parameters.get("new_limit", 0))
@@ -622,6 +671,77 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
 
         elif action_type == "CREDIT_LIMIT_INCREASE":
             response = requests.post("http://localhost:8000/api/v1/credit/limit-increase", json=parameters)
+            result = response.json()
+
+        # ── Razorpay Write Actions ────────────────────────────────────────────
+        elif action_type == "REFUND":
+            payment_id = parameters.get("payment_id")
+            if not payment_id:
+                _clear_in_flight(agent_id)
+                clear_processing(idem_key)
+                return {"status": "DENIED", "reason": "REFUND requires 'payment_id' parameter"}
+            response = requests.post(
+                f"{BANKING_API_URL}/payments/{payment_id}/refund",
+                json={
+                    "payment_id":  payment_id,
+                    "amount":      float(parameters.get("amount", 0)),
+                    "reason":      parameters.get("reason", "customer_request"),
+                },
+                timeout=10,
+            )
+            if response.status_code != 200:
+                err = response.json().get("detail", "Refund rejected by banking API")
+                _clear_in_flight(agent_id)
+                clear_processing(idem_key)
+                _audit_log(agent_id, action_type, "DENIED", err, parameters, risk_score)
+                _send_trust_feedback(agent_id, "ACTION_DENIED_POLICY", err[:120])
+                return {"status": "DENIED", "reason": err}
+            result = response.json()
+
+        elif action_type == "PAYOUT":
+            response = requests.post(
+                f"{BANKING_API_URL}/payouts",
+                json={
+                    "merchant_id":          parameters.get("merchant_id"),
+                    "amount":               float(parameters.get("amount", 0)),
+                    "destination_account":  parameters.get("destination_account"),
+                    "destination_verified": parameters.get("destination_verified", False),
+                    "reference":            parameters.get("reference", f"payout-{uuid.uuid4().hex[:8]}"),
+                    "currency":             parameters.get("currency", "INR"),
+                },
+                timeout=10,
+            )
+            if response.status_code != 200:
+                err = response.json().get("detail", "Payout rejected by banking API")
+                _clear_in_flight(agent_id)
+                clear_processing(idem_key)
+                _audit_log(agent_id, action_type, "DENIED", err, parameters, risk_score)
+                _send_trust_feedback(agent_id, "ACTION_DENIED_POLICY", err[:120])
+                return {"status": "DENIED", "reason": err}
+            result = response.json()
+
+        elif action_type == "PAYMENT_CAPTURE":
+            payment_id = parameters.get("payment_id")
+            if not payment_id:
+                _clear_in_flight(agent_id)
+                clear_processing(idem_key)
+                return {"status": "DENIED", "reason": "PAYMENT_CAPTURE requires 'payment_id' parameter"}
+            capture_amount = float(parameters.get("amount", 0)) or None
+            resp_payload = {}
+            if capture_amount:
+                resp_payload["amount"] = capture_amount
+            response = requests.post(
+                f"{BANKING_API_URL}/payments/{payment_id}/capture",
+                params=resp_payload,
+                timeout=10,
+            )
+            if response.status_code != 200:
+                err = response.json().get("detail", "Capture rejected by banking API")
+                _clear_in_flight(agent_id)
+                clear_processing(idem_key)
+                _audit_log(agent_id, action_type, "DENIED", err, parameters, risk_score)
+                _send_trust_feedback(agent_id, "ACTION_DENIED_POLICY", err[:120])
+                return {"status": "DENIED", "reason": err}
             result = response.json()
 
         else:

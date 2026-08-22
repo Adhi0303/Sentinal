@@ -66,6 +66,13 @@ def quarantine_agent(agent_id: str, triggered_by: str = "system") -> dict:
     }
     redis_client.publish(KILL_SWITCH_CHANNEL, json.dumps(payload))
 
+    # Wire trust engine: quarantine fires KILL_SWITCH_TRIGGERED (-20 trust delta)
+    try:
+        from trust_engine import update_trust
+        update_trust(agent_id, "KILL_SWITCH_TRIGGERED", f"Kill switch triggered by {triggered_by}")
+    except Exception as te:
+        print(f"[KILL-SWITCH] Trust update failed (non-blocking): {te}")
+
     print(f"[KILL-SWITCH] Agent '{agent_id}' QUARANTINED at {kill_time} by {triggered_by}")
     return {
         "status":    "QUARANTINED",
@@ -121,6 +128,13 @@ def release_agent(agent_id: str, released_by: str = "system") -> dict:
         "timestamp":   release_time,
     }
     redis_client.publish(KILL_SWITCH_CHANNEL, json.dumps(payload))
+
+    # Wire trust engine: recovery resets trust to 50 (agent must re-earn trust, not start at 100)
+    try:
+        from trust_engine import set_trust
+        set_trust(agent_id, 50.0)
+    except Exception as te:
+        print(f"[KILL-SWITCH] Trust reset failed (non-blocking): {te}")
 
     print(f"[KILL-SWITCH] Agent '{agent_id}' RELEASED at {release_time} by {released_by}")
     return {

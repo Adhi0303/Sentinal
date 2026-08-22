@@ -743,5 +743,88 @@ def get_merchant_transactions(merchant_id: str):
     }
 
 
+@app.post("/api/v1/payouts")
+def initiate_payout(request: PayoutRequest):
+    """
+    Module 9: Initiate a merchant settlement payout.
+    Used by SettlementAgent (QuickPay). Must be called via Sentinel SDK.
+    Business rule: destination_verified must be True (mirrors razorpay_payout.rego).
+    """
+    merch = _get_merchant(request.merchant_id)
+
+    # Hard block: destination not verified (last-resort check; OPA Rego is primary gate)
+    if not request.destination_verified:
+        raise HTTPException(
+            status_code=422,
+            detail="Payout destination is not verified. Verify destination account before initiating payout."
+        )
+
+    # Amount sanity
+    if request.amount <= 0:
+        raise HTTPException(status_code=422, detail="Payout amount must be greater than zero.")
+
+    # Merchant balance check
+    if request.amount > merch["balance_inr"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Insufficient merchant balance. Available: ₹{merch['balance_inr']:,.2f}, Requested: ₹{request.amount:,.2f}"
+        )
+
+    payout_id = f"po_{uuid.uuid4().hex[:8]}"
+    razorpay_merchants[request.merchant_id]["balance_inr"] -= request.amount
+
+    return {
+        "status":              "PROCESSED",
+        "payout_id":           payout_id,
+        "merchant_id":         request.merchant_id,
+        "merchant_name":       merch["name"],
+        "amount":              request.amount,
+        "currency":            request.currency,
+        "destination_account": request.destination_account,
+        "reference":           request.reference,
+        "merchant_balance_after": razorpay_merchants[request.merchant_id]["balance_inr"],
+        "processed_at":        _now(),
+    }
+
+
+@app.post("/api/v1/payments/{payment_id}/capture")
+def capture_payment(payment_id: str, amount: float = None):
+    """
+    Module 9: Capture an AUTHORIZED Razorpay payment.
+    Transitions payment from AUTHORIZED → CAPTURED, making it eligible for refund.
+    Used by FraudAnalysisAgent (SaasHub) to confirm legitimate transactions.
+    """
+    merchant_id, payment = _get_payment_from_any_merchant(payment_id)
+
+    if payment["status"] != "AUTHORIZED":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Payment '{payment_id}' cannot be captured. Status: {payment['status']} (must be AUTHORIZED)."
+        )
+
+    capture_amount = amount if amount is not None else payment["amount"]
+    if capture_amount > payment["amount"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Capture amount ({capture_amount}) exceeds authorized amount ({payment['amount']})."
+        )
+
+    # Transition to CAPTURED
+    for i, pmt in enumerate(razorpay_merchants[merchant_id]["payments"]):
+        if pmt["id"] == payment_id:
+            razorpay_merchants[merchant_id]["payments"][i]["status"] = "CAPTURED"
+            break
+
+    return {
+        "status":       "CAPTURED",
+        "payment_id":   payment_id,
+        "merchant_id":  merchant_id,
+        "amount":       capture_amount,
+        "currency":     "INR",
+        "captured_at":  _now(),
+        "message":      f"Payment {payment_id} captured successfully. Now eligible for refund.",
+    }
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

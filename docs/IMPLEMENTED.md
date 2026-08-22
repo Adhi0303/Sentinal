@@ -1,6 +1,6 @@
 # Sentinel — What Is Actually Implemented
 
-> **Last Updated:** 2026-08-22  
+> **Last Updated:** 2026-08-22 (v2 — Priority 2 backend fixes applied)
 > This document is a ground-truth audit of every feature that is **fully coded and functional** in the repository. It describes what each piece does and how it connects to everything else.
 
 ---
@@ -145,9 +145,18 @@ The brain of Sentinel. 1,126 lines, 40+ REST endpoints.
 - On failure/exception: the compensator reads in-flight records and can roll back.
 - `compensate_fleet()`: Rolls back all in-flight operations across the entire fleet.
 
+### Module 7.3 — Report Generation (`report_generator.py`)
+- Reads the entire `audit_log.jsonl`.
+- Verifies the cryptographic chain hash-by-hash before generating the report.
+- Translates JSON into plain English paragraphs (e.g., "✅ REFUND ₹2000.00 PROCESSED...").
+- Aggregates counters (Total spend evaluated, HITL escalations, Razorpay payouts processed).
+- Supports dual output formats: JSON (`/api/v1/audit/report`) and PDF via ReportLab (`/api/v1/audit/report/pdf`).
+- Now fully supports the Razorpay pivots, translating `REFUND`, `PAYOUT`, and `PAYMENT_CAPTURE` with correct ₹ (INR) symbols and specialized summaries.
+
 ### Module B — Trust Engine
 - **`trust_engine.py`**: Persistent, deterministic trust score (0.0–100.0) per agent stored in Redis.
-- 14 signal types with configurable weights (e.g., `ACTION_ALLOWED: +0.5`, `KILL_SWITCH_TRIGGERED: −20.0`).
+- **`main.py` -> `/api/v1/trust/{agent_id}/signal`**: The endpoint to ingest signals.
+- Supports signals like `TRANSACTION_COMPLETED` (+5.0), `POLICY_VIOLATION` (-10.0), `BEHAVIOR_ANOMALY_SEVERE` (-8.0), `KILL_SWITCH_TRIGGERED` (-20.0), and `HIGH_RISK_ESCALATED` (-2.0).
 - Full history kept (up to 500 events per agent) for chart rendering.
 - `update_trust()`, `set_trust()`, `get_trust_history()`, `get_trust_summary()` all exposed as REST endpoints.
 

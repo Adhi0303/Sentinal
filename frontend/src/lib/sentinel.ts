@@ -523,7 +523,7 @@ export async function evaluatePolicy(input: {
   return   { decision: "ALLOWED",      rule: "Rule 5 — Auto-Approve", reason: "Auto-approved by policy (Low risk)" };
 }
 
-// ─── HITL resolution (local only — backend has no dedicated HITL endpoint) ──
+// ─── HITL resolution — updates local state AND fires trust signal to backend ──
 
 export function resolveHitl(entryId: number, approved: boolean, note: string) {
   const e = simState.entries.find((x) => x.entry_id === entryId);
@@ -532,6 +532,18 @@ export function resolveHitl(entryId: number, approved: boolean, note: string) {
   e.reason   = approved
     ? `Approved by human reviewer. ${note}`.trim()
     : `Rejected by human: ${note}`;
+
+  // Fire trust signal to backend so HITL decisions affect trust scores.
+  // HITL_APPROVED: +0.2  |  HITL_REJECTED: −8.0  (defined in trust_engine.py)
+  if (e.agent_id) {
+    const signal = approved ? "HITL_APPROVED" : "HITL_REJECTED";
+    const reason = approved
+      ? `Human reviewer approved ${e.action_type}. ${note}`.trim()
+      : `Human reviewer rejected ${e.action_type}: ${note}`;
+    pushTrustSignal(e.agent_id, signal, reason).catch(() => {
+      // Fire-and-forget — non-blocking. Trust update may be delayed on network error.
+    });
+  }
 }
 
 // ─── Presentation helpers ────────────────────────────────────────────────────

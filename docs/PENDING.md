@@ -1,6 +1,6 @@
 # Sentinel — What Is Still Pending
 
-> **Last Updated:** 2026-08-22  
+> **Last Updated:** 2026-08-22 (v2 — Priority 2 backend fixes applied)  
 > This document lists every feature, fix, or integration that is **not yet coded, incomplete, or broken**. Items are grouped by priority and area.
 
 ---
@@ -43,58 +43,39 @@ The demo sandbox chat page only triggers `FEE_WAIVER` through the `customer_serv
 
 ---
 
-### 2.1 `trust_engine.py` — `HIGH_RISK_ESCALATED` Signal Not in Weight Table
+### ~~2.1 `trust_engine.py` — `HIGH_RISK_ESCALATED` Signal Not in Weight Table~~ ✅ FIXED
 
-**Where:** `safety-service/trust_engine.py` line 35–58
+**Where:** `safety-service/trust_engine.py`
 
-**What's broken:**  
-The SDK calls `_send_trust_feedback(agent_id, "HIGH_RISK_ESCALATED", ...)` whenever an action is escalated to HITL. But `"HIGH_RISK_ESCALATED"` is **not in `DEFAULT_WEIGHTS`**. When `update_trust()` receives it, it logs `"Unknown signal — skipping"` and does nothing. HITL escalations have zero trust impact.
-
-**Fix needed:**  
-Add `"HIGH_RISK_ESCALATED": "-2.0"` (a mild negative — being escalated is a small trust cost) to `DEFAULT_WEIGHTS` in `trust_engine.py`.
+**Fix applied:** Added `"HIGH_RISK_ESCALATED": "-2.0"` to `DEFAULT_WEIGHTS` with comment: *"HITL escalation — mild cost for needing human oversight"*.
 
 ---
 
-### 2.2 Module 7 — New Razorpay Audit Event Types Never Added
+### ~~2.2 Module 7 — New Razorpay Audit Event Types Never Added~~ ✅ FIXED
 
-**Where:** `safety-service/audit_ledger.py`, `safety-service/report_generator.py`
+**Where:** `safety-service/report_generator.py`
 
-**What's missing:**  
-The audit ledger writes generic `action_type` strings (e.g., `"REFUND"`, `"PAYOUT"`). But the report generator (`report_generator.py`) and the compliance report PDF template still only recognize the old AmEx event types (`FEE_WAIVER`, `WIRE_TRANSFER`, `CREDIT_LIMIT_INCREASE`) for categorization and statistics. Razorpay events appear as uncategorized in generated reports.
-
-**Fix needed:**  
-Update `report_generator.py` to include `REFUND`, `PAYOUT`, `PAYMENT_CAPTURE`, `GET_PAYMENT`, `GET_ORDER`, `GET_BALANCE` in its event-type category maps and summary statistics.
-
----
-
-### 2.3 `agents_.$id.tsx` — HITL Approve/Reject Doesn't Update Trust
-
-**Where:** `frontend/src/routes/hitl.tsx` and `safety-service/main.py` HITL endpoints
-
-**What's missing:**  
-When an operator approves or rejects an action in the HITL queue, the decision is recorded in the queue and forwarded to the banking API. But **no trust signal is emitted**. An `HITL_APPROVED` signal should add `+0.2` trust, and `HITL_REJECTED` should subtract `−8.0` — these signals are already defined in `trust_engine.py`'s `DEFAULT_WEIGHTS` but are never called from the HITL approval endpoint.
-
-**Fix needed:**  
-In `safety-service/main.py` at the `POST /api/v1/hitl/{id}/approve` and `POST /api/v1/hitl/{id}/reject` endpoints — call `update_trust(agent_id, "HITL_APPROVED", ...)` and `update_trust(agent_id, "HITL_REJECTED", ...)` respectively.
+**Fix applied:**
+- Added `action_type = entry.get("action_type", "")` extraction in the report loop.
+- Added INR (₹) currency formatting for Razorpay actions (`REFUND`, `PAYOUT`, `PAYMENT_CAPTURE`).
+- Added plain-English translations for `REFUND`, `PAYOUT`, `PAYMENT_CAPTURE`, and all `GET_*` read-only operations.
+- Added 6 new summary counters: `razorpay_refunds_processed`, `razorpay_payouts_processed`, `razorpay_captures_processed`, `razorpay_read_ops`, `razorpay_denied`, `razorpay_total_inr`.
 
 ---
 
-### 2.4 `/api/v1/agents/{id}/action` — `trust_before` Always Returns 100.0
+### ~~2.3 HITL Approve/Reject Doesn't Emit Trust Signals~~ ✅ FIXED
 
-**Where:** `safety-service/main.py` lines 1067–1073
+**Where:** `frontend/src/lib/sentinel.ts` — `resolveHitl()`
 
-**What's broken:**  
-```python
-tb = get_trust(agent_id)
-trust_before = tb.get("trust_score", 100.0)  # BUG: get_trust() returns a float, not a dict
-```
-`get_trust()` in `trust_engine.py` returns a **`float`**, not a dict. Calling `.get()` on a float raises `AttributeError` which is silently caught by the `except Exception: pass` block — so `trust_before` always stays at the default `100.0`. The `trust_delta` calculation is therefore always wrong.
+**Fix applied:** `resolveHitl()` now calls `pushTrustSignal(e.agent_id, "HITL_APPROVED" | "HITL_REJECTED", reason)` after updating local state. The call is fire-and-forget (non-blocking). `HITL_APPROVED` = `+0.2`, `HITL_REJECTED` = `−8.0` (both already defined in `trust_engine.py` `DEFAULT_WEIGHTS`).
 
-**Fix needed:**  
-```python
-trust_before = get_trust(agent_id)   # returns float directly
-```
-Same fix needed for `trust_after` at line 1105.
+---
+
+### ~~2.4 `/api/v1/agents/{id}/action` — `trust_before` Always Returns 100.0~~ ✅ FIXED
+
+**Where:** `safety-service/main.py` lines 1067–1073 and 1105
+
+**Fix applied:** Replaced both `tb.get("trust_score", 100.0)` and `ta.get("trust_score", trust_before)` with direct assignment: `trust_before = get_trust(agent_id)` and `trust_after = get_trust(agent_id)`. `get_trust()` returns a `float` — calling `.get()` on it raised a silent `AttributeError`, causing `trust_delta` on every live-feed card to always be `0.0`.
 
 ---
 
@@ -155,10 +136,10 @@ A structured Razorpay Buildathon submission document covering:
 |---|---|---|---|
 | 1.1 | Behavior Deviation Radar Chart (frontend component) | 🔴 High | Not built |
 | 1.2 | Demo Sandbox Razorpay actions in UI | 🔴 High | Not built |
-| 2.1 | `HIGH_RISK_ESCALATED` signal missing from trust weight table | 🟡 Medium | 1 line fix |
-| 2.2 | Report generator doesn't categorize Razorpay events | 🟡 Medium | Small update |
-| 2.3 | HITL approve/reject doesn't emit trust signals | 🟡 Medium | 2 endpoint patches |
-| 2.4 | `trust_before` always 100.0 in `/action` endpoint (type bug) | 🔴 High | 2 line fix |
+| 2.1 | `HIGH_RISK_ESCALATED` signal missing from trust weight table | 🟡 Medium | ✅ Fixed |
+| 2.2 | Report generator doesn't categorize Razorpay events | 🟡 Medium | ✅ Fixed |
+| 2.3 | HITL approve/reject doesn't emit trust signals | 🟡 Medium | ✅ Fixed |
+| 2.4 | `trust_before` always 100.0 in `/action` endpoint (type bug) | 🔴 High | ✅ Fixed |
 | 3.1 | Automated demo script (`tests/razorpay_demo.py`) | 🟠 Demo Risk | Not created |
 | 3.2 | README.md outdated — AmEx framing, no Razorpay quickstart | 🟠 Demo Risk | Needs rewrite |
 | 3.3 | `docs/razorpay/SUBMISSION.md` | 🟠 Submission | Not created |
@@ -167,7 +148,7 @@ A structured Razorpay Buildathon submission document covering:
 
 ## Quickest Wins (can be done in < 30 min each)
 
-1. **Fix `trust_before` bug** (2 lines in `main.py`) — makes trust delta accurate across the entire system.
-2. **Add `HIGH_RISK_ESCALATED` to trust weights** (1 line in `trust_engine.py`).
-3. **Wire HITL trust signals** (2 lines in the HITL approve/reject endpoints).
-4. **Add Razorpay actions to Policy Simulator dropdown** (`policy.tsx`) — immediately makes the Rego policies demoable from the UI.
+1. ~~**Fix `trust_before` bug** (2 lines in `main.py`)~~ ✅ Done.
+2. ~~**Add `HIGH_RISK_ESCALATED` to trust weights** (1 line in `trust_engine.py`)~~ ✅ Done.
+3. ~~**Wire HITL trust signals** (via `resolveHitl()` in `sentinel.ts`)~~ ✅ Done.
+4. **Add Razorpay actions to Policy Simulator dropdown** (`policy.tsx`) — immediately makes the Rego policies demoable from the UI. **Still pending.**

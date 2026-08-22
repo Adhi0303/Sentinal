@@ -1067,8 +1067,7 @@ async def agent_action(agent_id: str, req: AgentActionRequest):
     trust_before: float = 100.0
     autonomy_tier: str  = "UNKNOWN"
     try:
-        tb = get_trust(agent_id)
-        trust_before = tb.get("trust_score", 100.0)
+        trust_before = get_trust(agent_id)   # returns float directly
     except Exception:
         pass
     try:
@@ -1102,8 +1101,7 @@ async def agent_action(agent_id: str, req: AgentActionRequest):
     # Snapshot trust AFTER the action
     trust_after: float = trust_before
     try:
-        ta = get_trust(agent_id)
-        trust_after = ta.get("trust_score", trust_before)
+        trust_after = get_trust(agent_id)   # returns float directly
     except Exception:
         pass
 

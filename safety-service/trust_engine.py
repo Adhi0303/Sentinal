@@ -53,6 +53,9 @@ DEFAULT_WEIGHTS: dict[str, str] = {
     "BEHAVIOR_ANOMALY_SEVERE":   "-8.0",
     "VELOCITY_EVASION_DETECTED": "-10.0",
 
+    # HITL escalation — mild cost for needing human oversight
+    "HIGH_RISK_ESCALATED":       "-2.0",
+
     # Emergency
     "KILL_SWITCH_TRIGGERED":     "-20.0",
 }

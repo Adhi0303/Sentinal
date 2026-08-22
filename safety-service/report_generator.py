@@ -64,10 +64,19 @@ def _plain_english(entry: Dict[str, Any]) -> str:
     except Exception:
         dt = ts
 
-    # Amount extraction
+    # Amount extraction — supports both USD and INR amounts
     amount = params.get("amount", None)
     account = params.get("account_id", params.get("account", None))
-    amount_str = f"${amount:.2f}" if amount is not None else ""
+    payment_id = params.get("payment_id", params.get("id", ""))
+    merchant_id = params.get("merchant_id", "")
+    # Razorpay amounts are in INR; legacy amounts in USD
+    is_razorpay = action in {"REFUND", "PAYOUT", "PAYMENT_CAPTURE",
+                              "GET_PAYMENT", "GET_ORDER", "GET_BALANCE",
+                              "GET_SETTLEMENT", "GET_TRANSACTIONS"}
+    if amount is not None:
+        amount_str = f"₹{amount:.2f}" if is_razorpay else f"${amount:.2f}"
+    else:
+        amount_str = ""
 
     # Risk score label — show N/A if the request was blocked before scoring ran
     # (risk_score=0 on a DENIED means schema/injection blocked it before the risk engine)
@@ -144,6 +153,45 @@ def _plain_english(entry: Dict[str, Any]) -> str:
             f"Agent is now ACTIVE and may resume normal operations."
         )
 
+    # ── Razorpay-native action translations ──────────────────────────────
+    elif action == "REFUND":
+        pid = params.get("payment_id", payment_id)
+        return (
+            f"{'✅' if decision == 'ALLOWED' else '❌'} REFUND {amount_str} "
+            f"{'PROCESSED' if decision == 'ALLOWED' else 'DENIED'} at {dt}. "
+            f"Agent: '{agent}'. Payment ID: {pid or 'N/A'}. "
+            f"Risk Score: {risk_str}. OPA Policy: razorpay_refund.rego. "
+            f"Reason: {reason}"
+        )
+
+    elif action == "PAYOUT":
+        dest = params.get("destination_account", "")
+        return (
+            f"{'✅' if decision == 'ALLOWED' else '❌'} MERCHANT PAYOUT {amount_str} "
+            f"{'PROCESSED' if decision == 'ALLOWED' else 'DENIED'} at {dt}. "
+            f"Agent: '{agent}'. Merchant: {merchant_id or 'N/A'}. Destination: {dest or 'N/A'}. "
+            f"Risk Score: {risk_str}. OPA Policy: razorpay_payout.rego. "
+            f"Reason: {reason}"
+        )
+
+    elif action == "PAYMENT_CAPTURE":
+        pid = params.get("payment_id", payment_id)
+        return (
+            f"{'✅' if decision == 'ALLOWED' else '❌'} PAYMENT CAPTURE {amount_str} "
+            f"{'EXECUTED' if decision == 'ALLOWED' else 'DENIED'} at {dt}. "
+            f"Agent: '{agent}'. Payment ID: {pid or 'N/A'}. "
+            f"Risk Score: {risk_str}. OPA Policy: razorpay_payments.rego. "
+            f"Reason: {reason}"
+        )
+
+    elif action in {"GET_PAYMENT", "GET_ORDER", "GET_BALANCE",
+                    "GET_SETTLEMENT", "GET_TRANSACTIONS"}:
+        return (
+            f"🔍 READ-ONLY: {action.replace('_', ' ')} at {dt}. "
+            f"Agent: '{agent}'. Fast-path gate (no financial mutation). "
+            f"Result: {decision}."
+        )
+
     else:
         return f"[{decision}] {action} by '{agent}' at {dt}. Details: {reason}"
 
@@ -189,12 +237,20 @@ def generate_json_report() -> Dict[str, Any]:
         "total_money_approved":    0.0,
         "total_money_denied":      0.0,
         "total_money_escalated":   0.0,
+        # ── Razorpay-specific counters ────────────────────────────────────
+        "razorpay_refunds_processed":  0,
+        "razorpay_payouts_processed":  0,
+        "razorpay_captures_processed": 0,
+        "razorpay_read_ops":           0,
+        "razorpay_denied":             0,
+        "razorpay_total_inr":          0.0,
     }
 
     translated = []
     for entry in entries:
         d = entry.get("decision", "")
         params = entry.get("parameters", {})
+        action_type = entry.get("action_type", "")
 
         amt = float(params.get("amount", 0) or 0)
         
@@ -205,9 +261,21 @@ def generate_json_report() -> Dict[str, Any]:
         if d == "ALLOWED":
             summary["allowed"] += 1
             summary["total_money_approved"] += amt
+            # Razorpay write-action counters
+            if action_type == "REFUND":
+                summary["razorpay_refunds_processed"] += 1
+                summary["razorpay_total_inr"] += amt
+            elif action_type == "PAYOUT":
+                summary["razorpay_payouts_processed"] += 1
+                summary["razorpay_total_inr"] += amt
+            elif action_type == "PAYMENT_CAPTURE":
+                summary["razorpay_captures_processed"] += 1
+                summary["razorpay_total_inr"] += amt
         elif d == "DENIED":
             summary["denied"] += 1
             summary["total_money_denied"] += amt
+            if action_type in {"REFUND", "PAYOUT", "PAYMENT_CAPTURE"}:
+                summary["razorpay_denied"] += 1
         elif d == "BLOCKED":
             summary["blocked_by_killswitch"] += 1
         elif d == "DUPLICATE_REJECTED":
@@ -220,6 +288,11 @@ def generate_json_report() -> Dict[str, Any]:
             summary["compensated"] += 1
         elif d in {"AGENT_QUARANTINED", "FLEET_QUARANTINED", "AGENT_RELEASED"}:
             summary["kill_switch_events"] += 1
+
+        # Count read-only Razorpay ops
+        if action_type in {"GET_PAYMENT", "GET_ORDER", "GET_BALANCE",
+                            "GET_SETTLEMENT", "GET_TRANSACTIONS"}:
+            summary["razorpay_read_ops"] += 1
 
         translated.append({
             **entry,

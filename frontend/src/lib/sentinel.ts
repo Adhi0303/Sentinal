@@ -46,6 +46,12 @@ export interface AuditEntry {
   prev_hash: string;
   parameters: Record<string, unknown>;
   policy_rule?: string;
+  // Trust fields — populated by /api/v1/agents/{id}/action responses
+  trust_delta?:  number | null;
+  trust_before?: number | null;
+  trust_after?:  number | null;
+  autonomy_tier?: string | null;
+  behavior_flags?: string[];
 }
 
 // ─── Agent fleet ────────────────────────────────────────────────────────────
@@ -64,13 +70,18 @@ export interface AgentStatus {
 
 // Map backend agent_id to a human-readable name
 const AGENT_NAMES: Record<string, string> = {
-  agent_cust_srv_01:     "Customer Service Agent",
-  agent_trading_01:      "Treasury & Trading Agent",
-  agent_fraud_monitor_01:"Fraud Monitor Agent",
-  agent_credit_ops_01:   "Credit Operations Agent",
-  agent_treasury_001:    "Treasury Agent",
-  agent_procurement_001: "Procurement Agent",
-  agent_underwriting_001:"Underwriting Agent",
+  agent_cust_srv_01:          "Customer Service Agent",
+  agent_trading_01:           "Treasury & Trading Agent",
+  agent_fraud_monitor_01:     "Fraud Monitor Agent",
+  agent_credit_ops_01:        "Credit Operations Agent",
+  agent_treasury_001:         "Treasury Agent",
+  agent_procurement_001:      "Procurement Agent",
+  agent_underwriting_001:     "Underwriting Agent",
+  // Razorpay fleet
+  "refund-agent-001":         "ZoopCart Refund Agent",
+  "settlement-agent-001":     "QuickPay Settlement Agent",
+  "support-agent-001":        "FoodieApp Support Agent",
+  "fraud-analysis-agent-001": "SaasHub Fraud Analysis Agent",
 };
 
 // ─── API configuration ──────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 
 import { fetchRecent, fmtMoney, fmtTime, type AuditEntry, type Decision } from "@/lib/sentinel";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,32 @@ const FILTERS: Array<{ label: string; value: Decision | "ALL" }> = [
   { label: "HITL", value: "REQUIRE_HITL" },
   { label: "Blocked", value: "BLOCKED_KILLSWITCH" },
 ];
+
+/** Renders the trust delta badge: ▲ +0.5 (green) / ▼ -20 (red) / — (grey) */
+function TrustDeltaBadge({ delta }: { delta?: number | null }) {
+  if (delta == null) return null;
+
+  const abs   = Math.abs(delta).toFixed(1);
+  const isPos = delta > 0;
+  const isNeg = delta < 0;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-[2px] rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
+        isPos && "bg-emerald-50 text-emerald-600",
+        isNeg && "bg-red-50 text-red-500",
+        !isPos && !isNeg && "bg-muted/40 text-muted-foreground",
+      )}
+      title={`Trust change: ${delta > 0 ? "+" : ""}${delta}`}
+    >
+      {isPos && <ArrowUp className="h-3 w-3" />}
+      {isNeg && <ArrowDown className="h-3 w-3" />}
+      {!isPos && !isNeg && <Minus className="h-3 w-3" />}
+      {isPos ? "+" : isNeg ? "-" : ""}{abs}
+    </span>
+  );
+}
 
 export function LiveFeed({ onSelect }: { onSelect: (e: AuditEntry) => void }) {
   const [filter, setFilter] = useState<Decision | "ALL">("ALL");
@@ -85,18 +112,31 @@ export function LiveFeed({ onSelect }: { onSelect: (e: AuditEntry) => void }) {
                     <span className="mono text-[11px] text-muted-foreground">
                       {fmtTime(e.timestamp)}
                     </span>
+                    {/* Autonomy tier pill */}
+                    {e.autonomy_tier && (
+                      <>
+                        <span className="text-[11px] text-muted-foreground/50">•</span>
+                        <span className="mono text-[10px] text-muted-foreground/70 uppercase tracking-wide">
+                          {e.autonomy_tier}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
               
               <div className="mt-3 flex items-center justify-between border-t border-white/30 pt-3">
-                {e.risk_score === null ? (
-                  <span className="mono text-[11px] text-muted-foreground">
-                    Risk: N/A ({e.gate_failed})
-                  </span>
-                ) : (
-                  <RiskBar score={e.risk_score} />
-                )}
+                <div className="flex items-center gap-2">
+                  {e.risk_score === null ? (
+                    <span className="mono text-[11px] text-muted-foreground">
+                      Risk: N/A ({e.gate_failed})
+                    </span>
+                  ) : (
+                    <RiskBar score={e.risk_score} />
+                  )}
+                  {/* Trust delta badge — green ▲ or red ▼ */}
+                  <TrustDeltaBadge delta={e.trust_delta} />
+                </div>
                 <DecisionBadge decision={e.decision} />
               </div>
             </button>

@@ -6,7 +6,11 @@ import uvicorn
 from datetime import datetime, timezone
 import uuid
 
-app = FastAPI(title="Mock Core Banking API — American Express Hackathon")
+app = FastAPI(
+    title="Mock Core Banking API — Sentinel Razorpay Edition",
+    description="Simulates Razorpay merchant banking operations and legacy AmEx endpoints.",
+    version="2.0.0"
+)
 
 # CORS — allow Lovable and any local frontend to connect
 app.add_middleware(
@@ -132,6 +136,90 @@ accounts = {
     },
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Razorpay Merchant Database (Module 9: Razorpay Pivot)
+# ─────────────────────────────────────────────────────────────────────────────
+razorpay_merchants = {
+    "merch_zoopCart": {
+        "name":            "ZoopCart",
+        "type":            "E_COMMERCE",
+        "status":          "ACTIVE",
+        "balance_inr":     2_50_000.0,   # ₹2,50,000
+        "per_tx_limit":    10_000.0,      # ₹10,000 per refund
+        "daily_refund_budget": 5_00_000.0,
+        "currency":        "INR",
+        "payments": [
+            {"id": "pay_zoo001", "amount": 5_999.0,  "status": "CAPTURED",  "age_hours": 2,   "customer": "cust_a1", "method": "UPI"},
+            {"id": "pay_zoo002", "amount": 2_499.0,  "status": "CAPTURED",  "age_hours": 24,  "customer": "cust_a2", "method": "CARD"},
+            {"id": "pay_zoo003", "amount": 12_000.0, "status": "CAPTURED",  "age_hours": 48,  "customer": "cust_a3", "method": "NETBANKING"},
+            {"id": "pay_zoo004", "amount": 9_800.0,  "status": "CAPTURED",  "age_hours": 5,   "customer": "cust_a4", "method": "UPI"},
+            {"id": "pay_zoo005", "amount": 9_900.0,  "status": "CAPTURED",  "age_hours": 3,   "customer": "cust_a5", "method": "UPI"},
+            {"id": "pay_zoo006", "amount": 9_750.0,  "status": "CAPTURED",  "age_hours": 1,   "customer": "cust_a6", "method": "CARD"},
+            {"id": "pay_zoo007", "amount": 4_200.0,  "status": "REFUNDED",  "age_hours": 72,  "customer": "cust_a7", "method": "UPI"},
+            {"id": "pay_zoo008", "amount": 1_100.0,  "status": "AUTHORIZED", "age_hours": 100, "customer": "cust_a8", "method": "WALLET"},
+        ],
+        "orders": [
+            {"id": "order_z001", "amount": 5_999.0,  "status": "PAID",    "payment_id": "pay_zoo001", "created_at": "2026-08-22T09:00:00Z"},
+            {"id": "order_z002", "amount": 2_499.0,  "status": "PAID",    "payment_id": "pay_zoo002", "created_at": "2026-08-21T10:00:00Z"},
+            {"id": "order_z003", "amount": 12_000.0, "status": "PAID",    "payment_id": "pay_zoo003", "created_at": "2026-08-20T08:00:00Z"},
+        ]
+    },
+    "merch_foodieApp": {
+        "name":            "FoodieApp",
+        "type":            "FOOD_DELIVERY",
+        "status":          "ACTIVE",
+        "balance_inr":     75_000.0,
+        "per_tx_limit":    3_000.0,      # ₹3,000 per refund
+        "daily_refund_budget": 50_000.0,
+        "currency":        "INR",
+        "payments": [
+            {"id": "pay_food001", "amount": 850.0,  "status": "CAPTURED",   "age_hours": 1,   "customer": "cust_b1", "method": "UPI"},
+            {"id": "pay_food002", "amount": 1_200.0, "status": "CAPTURED",  "age_hours": 12,  "customer": "cust_b2", "method": "CARD"},
+            {"id": "pay_food003", "amount": 4_500.0, "status": "CAPTURED",  "age_hours": 6,   "customer": "cust_b3", "method": "NETBANKING"},
+            {"id": "pay_food004", "amount": 320.0,   "status": "FAILED",    "age_hours": 2,   "customer": "cust_b4", "method": "UPI"},
+        ],
+        "orders": [
+            {"id": "order_f001", "amount": 850.0,   "status": "DELIVERED",  "payment_id": "pay_food001", "created_at": "2026-08-22T10:00:00Z"},
+            {"id": "order_f002", "amount": 1_200.0, "status": "CANCELLED",  "payment_id": "pay_food002", "created_at": "2026-08-22T06:00:00Z"},
+        ]
+    },
+    "merch_saasHub": {
+        "name":            "SaasHub",
+        "type":            "B2B_SAAS",
+        "status":          "ACTIVE",
+        "balance_inr":     18_00_000.0,   # ₹18,00,000
+        "per_tx_limit":    50_000.0,       # ₹50,000
+        "daily_refund_budget": 20_00_000.0,
+        "currency":        "INR",
+        "payments": [
+            {"id": "pay_saas001", "amount": 49_999.0,  "status": "CAPTURED",  "age_hours": 24,   "customer": "cust_c1", "method": "CARD"},
+            {"id": "pay_saas002", "amount": 12_500.0,  "status": "CAPTURED",  "age_hours": 72,   "customer": "cust_c2", "method": "NETBANKING"},
+            {"id": "pay_saas003", "amount": 75_000.0,  "status": "AUTHORIZED", "age_hours": 130,  "customer": "cust_c3", "method": "CARD"},  # expired!
+        ],
+        "orders": [
+            {"id": "order_s001", "amount": 49_999.0, "status": "ACTIVE", "payment_id": "pay_saas001", "created_at": "2026-08-21T08:00:00Z"},
+        ]
+    },
+    "merch_quickPay": {
+        "name":            "QuickPay",
+        "type":            "PAYMENT_AGGREGATOR",
+        "status":          "ACTIVE",
+        "balance_inr":     50_00_000.0,   # ₹50,00,000
+        "per_tx_limit":    1_00_000.0,    # ₹1,00,000
+        "daily_refund_budget": 1_00_00_000.0,
+        "currency":        "INR",
+        "payments": [
+            {"id": "pay_qp001", "amount": 85_000.0,  "status": "CAPTURED",  "age_hours": 6,   "customer": "cust_d1", "method": "NEFT"},
+            {"id": "pay_qp002", "amount": 5_50_000.0, "status": "AUTHORIZED", "age_hours": 2,  "customer": "cust_d2", "method": "RTGS"},
+            {"id": "pay_qp003", "amount": 25_000.0,  "status": "CAPTURED",  "age_hours": 48,  "customer": "cust_d3", "method": "UPI"},
+        ],
+        "orders": []
+    },
+}
+
+# Refund ledger — tracks processed refunds
+refunds: dict = {}
+
 # 2PC Reserve Ledger — tracks locked/reserved balances (Module 5.3)
 reserves: dict = {}
 
@@ -165,6 +253,21 @@ class ReserveRequest(BaseModel):
 class CommitRequest(BaseModel):
     reserve_id: str
     action: str   # "COMMIT" or "ROLLBACK"
+
+# ── Razorpay request models ───────────────────────────────────────────────────
+class RefundRequest(BaseModel):
+    payment_id: str
+    amount: float
+    reason: str = "customer_request"
+    refund_destination: Optional[str] = None  # defaults to original source if None
+
+class PayoutRequest(BaseModel):
+    merchant_id: str
+    amount: float
+    destination_account: str
+    destination_verified: bool = False
+    reference: str
+    currency: str = "INR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -455,6 +558,189 @@ def list_reservations():
         },
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODULE 9: Razorpay-Native Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_merchant(merchant_id: str) -> dict:
+    if merchant_id not in razorpay_merchants:
+        raise HTTPException(status_code=404, detail=f"Merchant '{merchant_id}' not found.")
+    return razorpay_merchants[merchant_id]
+
+def _get_payment_from_any_merchant(payment_id: str) -> tuple:
+    """Find a payment across all merchants. Returns (merchant_id, payment_dict)."""
+    for mid, merch in razorpay_merchants.items():
+        for pmt in merch.get("payments", []):
+            if pmt["id"] == payment_id:
+                return mid, pmt
+    raise HTTPException(status_code=404, detail=f"Payment '{payment_id}' not found.")
+
+
+@app.get("/api/v1/merchants/{merchant_id}/balance")
+def get_merchant_balance(merchant_id: str):
+    """
+    Module 9: Get real-time merchant settlement balance.
+    Used by SettlementAgent (QuickPay) and fraud analysis.
+    """
+    merch = _get_merchant(merchant_id)
+    return {
+        "merchant_id":     merchant_id,
+        "name":            merch["name"],
+        "type":            merch["type"],
+        "status":          merch["status"],
+        "balance_inr":     merch["balance_inr"],
+        "per_tx_limit":    merch["per_tx_limit"],
+        "currency":        merch.get("currency", "INR"),
+        "as_of":           _now(),
+    }
+
+
+@app.get("/api/v1/merchants")
+def list_merchants():
+    """Module 9: List all registered Razorpay merchants."""
+    return {
+        "merchants": {
+            mid: {
+                "name":   m["name"],
+                "type":   m["type"],
+                "status": m["status"],
+                "balance_inr": m["balance_inr"],
+            }
+            for mid, m in razorpay_merchants.items()
+        }
+    }
+
+
+@app.post("/api/v1/payments/{payment_id}/refund")
+def refund_payment(payment_id: str, request: RefundRequest):
+    """
+    Module 9: Process a refund for a captured Razorpay payment.
+    Used by the RefundAgent (ZoopCart). Must be called via Sentinel SDK.
+    Business rules enforced here are a last-resort check; OPA Rego is the
+    primary policy gate.
+    """
+    merchant_id, payment = _get_payment_from_any_merchant(payment_id)
+    merch = razorpay_merchants[merchant_id]
+
+    # Already refunded?
+    if payment["status"] == "REFUNDED":
+        raise HTTPException(status_code=409, detail=f"Payment '{payment_id}' has already been fully refunded.")
+    # Failed payment?
+    if payment["status"] == "FAILED":
+        raise HTTPException(status_code=422, detail=f"Cannot refund a failed payment (status=FAILED).")
+    # Not captured?
+    if payment["status"] not in ("CAPTURED",):
+        raise HTTPException(status_code=422, detail=f"Payment must be CAPTURED to refund. Current status: {payment['status']}.")
+    # Amount check
+    if request.amount > payment["amount"]:
+        raise HTTPException(status_code=422, detail=f"Refund amount ({request.amount}) exceeds original payment ({payment['amount']}).")
+    # Merchant balance check
+    if request.amount > merch["balance_inr"]:
+        raise HTTPException(status_code=422, detail=f"Insufficient merchant balance for refund.")
+
+    refund_id = f"rfnd_{uuid.uuid4().hex[:8]}"
+    razorpay_merchants[merchant_id]["balance_inr"] -= request.amount
+
+    # Update payment status
+    for i, pmt in enumerate(razorpay_merchants[merchant_id]["payments"]):
+        if pmt["id"] == payment_id:
+            razorpay_merchants[merchant_id]["payments"][i]["status"] = "REFUNDED"
+            break
+
+    refunds[refund_id] = {
+        "refund_id":    refund_id,
+        "payment_id":   payment_id,
+        "merchant_id":  merchant_id,
+        "amount":       request.amount,
+        "reason":       request.reason,
+        "status":       "PROCESSED",
+        "processed_at": _now(),
+    }
+
+    return {
+        "status":        "PROCESSED",
+        "refund_id":     refund_id,
+        "payment_id":    payment_id,
+        "merchant_id":   merchant_id,
+        "amount":        request.amount,
+        "currency":      "INR",
+        "original_payment_amount": payment["amount"],
+        "merchant_balance_after":  razorpay_merchants[merchant_id]["balance_inr"],
+        "processed_at":  _now(),
+    }
+
+
+@app.get("/api/v1/orders/{order_id}")
+def get_order(order_id: str):
+    """
+    Module 9: Fetch order metadata by order ID across all merchants.
+    Used by RefundAgent and SupportAgent to validate before processing.
+    """
+    for mid, merch in razorpay_merchants.items():
+        for order in merch.get("orders", []):
+            if order["id"] == order_id:
+                return {
+                    "order_id":   order_id,
+                    "merchant_id": mid,
+                    "merchant_name": merch["name"],
+                    **order,
+                }
+    raise HTTPException(status_code=404, detail=f"Order '{order_id}' not found.")
+
+
+@app.get("/api/v1/payments/{payment_id}")
+def get_payment(payment_id: str):
+    """
+    Module 9: Fetch payment details by payment ID.
+    Used by RefundAgent, SupportAgent, and FraudAnalysisAgent.
+    """
+    merchant_id, payment = _get_payment_from_any_merchant(payment_id)
+    merch = razorpay_merchants[merchant_id]
+    return {
+        "payment_id":   payment_id,
+        "merchant_id":  merchant_id,
+        "merchant_name": merch["name"],
+        "amount":        payment["amount"],
+        "currency":      "INR",
+        "status":        payment["status"],
+        "age_hours":     payment["age_hours"],
+        "customer_id":   payment["customer"],
+        "method":        payment["method"],
+        "per_tx_limit":  merch["per_tx_limit"],
+        "already_refunded": payment["status"] == "REFUNDED",
+    }
+
+
+@app.get("/api/v1/refunds/{refund_id}")
+def get_refund(refund_id: str):
+    """Module 9: Fetch refund status by refund ID."""
+    if refund_id not in refunds:
+        raise HTTPException(status_code=404, detail=f"Refund '{refund_id}' not found.")
+    return refunds[refund_id]
+
+
+@app.get("/api/v1/merchants/{merchant_id}/payments")
+def list_merchant_payments(merchant_id: str, status: Optional[str] = None):
+    """Module 9: List all payments for a merchant, optionally filtered by status."""
+    merch = _get_merchant(merchant_id)
+    payments = merch.get("payments", [])
+    if status:
+        payments = [p for p in payments if p["status"].upper() == status.upper()]
+    return {"merchant_id": merchant_id, "count": len(payments), "payments": payments}
+
+
+@app.get("/api/v1/merchants/{merchant_id}/transactions")
+def get_merchant_transactions(merchant_id: str):
+    """Module 9: Fraud analysis view — all transactions for a merchant."""
+    merch = _get_merchant(merchant_id)
+    return {
+        "merchant_id":  merchant_id,
+        "name":         merch["name"],
+        "payments":     merch.get("payments", []),
+        "total_payments": len(merch.get("payments", [])),
+        "total_volume":   sum(p["amount"] for p in merch.get("payments", [])),
+    }
 
 
 if __name__ == "__main__":

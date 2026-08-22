@@ -345,6 +345,38 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     force_hitl_from_autonomy = autonomy_result.get("requires_hitl", False)
     autonomy_limits          = autonomy_result.get("limits_override", {})
 
+    # ── Gate 0.3: Behavior Deviation Hook ──────────────────────────────────────
+    # Runs BEFORE the financial gates. High deviation score boosts risk score
+    # downstream so HITL / DENY thresholds are reached more easily.
+    behavior_risk_boost = 0
+    behavior_flags      = []
+    try:
+        amount_for_behavior  = parameters.get("amount", parameters.get("new_limit", 0))
+        account_for_behavior = parameters.get("account_id") or parameters.get("to_account") or parameters.get("from_account", "unknown")
+        beh_resp = requests.post(
+            f"{SAFETY_SERVICE_URL}/behavior/{agent_id}/check",
+            json={
+                "tool_name":  action_type,
+                "amount":     float(amount_for_behavior),
+                "account_id": account_for_behavior,
+                "call_depth": 1,
+            },
+            timeout=3
+        )
+        if beh_resp.status_code == 200:
+            beh_data         = beh_resp.json()
+            deviation_score  = beh_data.get("deviation_score", 0)
+            behavior_flags   = beh_data.get("flags", [])
+            if deviation_score > 60:
+                behavior_risk_boost = 20
+                print(f"[SENTINEL] Gate 0.3 Behavior : HIGH deviation ({deviation_score}) → risk +20 | flags={behavior_flags}")
+            else:
+                print(f"[SENTINEL] Gate 0.3 Behavior : deviation={deviation_score} | flags={behavior_flags or 'none'}")
+        else:
+            print(f"[SENTINEL] Gate 0.3 Behavior : check returned {beh_resp.status_code} (non-blocking)")
+    except Exception as beh_err:
+        print(f"[SENTINEL] Gate 0.3 Behavior : unreachable ({beh_err}) — skipping (non-blocking)")
+
     # GATE 0: Quarantine Check (Module 6.2) — reads Redis directly, sub-millisecond, no HTTP
     quarantine_state = check_quarantine_status(agent_id)
     if quarantine_state == "QUARANTINED":
@@ -391,6 +423,7 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     if graph_result.get("status") == "BLOCKED":
         reason = graph_result["reason"]
         print(f"[SENTINEL] Graph/Cycle Check: BLOCKED - {reason}")
+        _send_trust_feedback(agent_id, "CYCLE_DETECTED", reason[:120])
         _audit_log(agent_id, action_type, "DENIED", reason, parameters)
         return {"status": "DENIED", "reason": reason}
     current_depth = graph_result.get("current_depth", 1)
@@ -413,6 +446,7 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     if deep_val["status"] != "PASSED":
         reason = deep_val["reason"]
         print(f"[SENTINEL] Deep Parameter Validation: FAILED - {reason}")
+        _send_trust_feedback(agent_id, "PROMPT_INJECTION_DETECTED", reason[:120])
         _audit_log(agent_id, action_type, "DENIED", reason, parameters)
         return deep_val
     print("[SENTINEL] Deep Parameter Validation: PASSED")
@@ -429,6 +463,7 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
         if not allowed:
             reason = "Sentinel Velocity Violation: Spend rate limit exceeded. Possible Salami Slicing Attack detected."
             print("[SENTINEL] Redis Velocity Check: FAILED (rate limit exceeded)")
+            _send_trust_feedback(agent_id, "ACTION_DENIED_VELOCITY", reason[:120])
             _audit_log(agent_id, action_type, "DENIED", reason, parameters)
             return {"status": "DENIED", "reason": reason}
         print("[SENTINEL] Redis Velocity Check: PASSED")
@@ -439,8 +474,27 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
     account_id = parameters.get("account_id") or parameters.get("from_account", "unknown")
     amount = parameters.get("amount", parameters.get("new_limit", 0))
     risk_result = compute_contextual_risk(amount, account_id, current_depth)
-    risk_score = risk_result.get("score", 0)
-    print(f"[SENTINEL] Risk Score: {risk_score} ({risk_result.get('risk_level')}) | Factors: {risk_result.get('factors')}")
+    risk_score  = risk_result.get("score", 0)
+    # Apply behavior deviation boost from Gate 0.3
+    if behavior_risk_boost > 0:
+        risk_score = min(100, risk_score + behavior_risk_boost)
+        print(f"[SENTINEL] Risk Score (after behavior boost): {risk_score} (boosted +{behavior_risk_boost}) | flags={behavior_flags}")
+    else:
+        print(f"[SENTINEL] Risk Score: {risk_score} ({risk_result.get('risk_level')}) | Factors: {risk_result.get('factors')}")
+
+    # Force HITL if autonomy tier requires it — regardless of risk score
+    if force_hitl_from_autonomy:
+        reason = f"Autonomy tier [{autonomy_result.get('tier')}] requires human approval for all actions."
+        print(f"[SENTINEL] Gate 0.2 Force-HITL: {reason}")
+        _send_trust_feedback(agent_id, "HIGH_RISK_ESCALATED", reason)
+        _audit_log(agent_id, action_type, "REQUIRE_HITL", reason, parameters, risk_score)
+        return {
+            "status":         "REQUIRE_HITL",
+            "reason":         reason,
+            "gate":           "AUTONOMY_TIER",
+            "autonomy_tier":  autonomy_result.get("tier"),
+            "behavior_flags": behavior_flags,
+        }
 
     # OPA receives a unified parameter set with the risk score
     # trading_limits.rego expects 'trade_value'; servicing_disputes.rego expects 'amount'
@@ -463,11 +517,21 @@ def execute_governed_tool(agent_id: str, action_type: str, parameters: dict, tra
             print(f"[SENTINEL] OPA Decision: {decision} | Reason: {reason}")
 
             if decision == "DENY":
+                _send_trust_feedback(agent_id, "ACTION_DENIED_POLICY", reason[:120])
                 _audit_log(agent_id, action_type, "DENIED", reason, parameters, risk_score)
-                return {"status": "DENIED", "reason": f"Policy Engine DENY: {reason}"}
+                return {
+                    "status":         "DENIED",
+                    "reason":         f"Policy Engine DENY: {reason}",
+                    "behavior_flags": behavior_flags,
+                }
             elif decision == "REQUIRE_HITL":
+                _send_trust_feedback(agent_id, "HIGH_RISK_ESCALATED", reason[:120])
                 _audit_log(agent_id, action_type, "REQUIRE_HITL", reason, parameters, risk_score)
-                return {"status": "REQUIRE_HITL", "reason": f"Human Approval Required: {reason}"}
+                return {
+                    "status":         "REQUIRE_HITL",
+                    "reason":         f"Human Approval Required: {reason}",
+                    "behavior_flags": behavior_flags,
+                }
         else:
             reason = "Policy Engine Evaluation Failed."
             print(f"[SENTINEL] Error from Policy Engine: {opa_resp.text}")

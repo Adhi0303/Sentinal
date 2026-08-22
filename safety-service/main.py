@@ -143,6 +143,53 @@ async def policy_evaluate(req: PolicyRequest):
     """
     print(f"\n[SAFETY SERVICE] Evaluating OPA Policy for action: {req.action_type}")
     
+    # ── Capability Check: is agent allowed to perform this action type? ─────────
+    agent_profile   = None
+    agent_limit     = None
+    agent_trust     = 100.0  # fallback if trust engine is unreachable
+    if req.parameters.get("agent_id"):
+        try:
+            ag_resp = http_requests.get(
+                f"http://localhost:8001/api/v1/agents/{req.parameters['agent_id']}",
+                timeout=3
+            )
+            if ag_resp.status_code == 200:
+                agent_profile = ag_resp.json()
+                allowed_tools = [t.upper() for t in agent_profile.get("allowed_tools", [])]
+                # Map action_type to the tool name the agent must have
+                if req.action_type.upper() not in allowed_tools:
+                    cap_reason = (
+                        f"Capability violation: agent '{req.parameters['agent_id']}' is not allowed to "
+                        f"perform '{req.action_type}'. Allowed: {allowed_tools}"
+                    )
+                    print(f"[SAFETY SERVICE] CAPABILITY CHECK FAILED: {cap_reason}")
+                    # Emit trust signal for capability violation
+                    try:
+                        http_requests.post(
+                            f"http://localhost:8001/api/v1/trust/{req.parameters['agent_id']}/signal",
+                            json={"signal_event": "CAPABILITY_VIOLATION", "reason": cap_reason[:200]},
+                            timeout=2
+                        )
+                    except Exception:
+                        pass
+                    return PolicyResponse(decision="DENY", reason=cap_reason)
+                agent_limit = agent_profile.get("financial_limit_per_tx")
+        except Exception as cap_err:
+            print(f"[SAFETY SERVICE] Capability check error (non-blocking): {cap_err}")
+    
+    # ── Fetch live trust score for enriching OPA input ──────────────────────────
+    agent_id_for_trust = req.parameters.get("agent_id")
+    if agent_id_for_trust:
+        try:
+            tr_resp = http_requests.get(
+                f"http://localhost:8001/api/v1/trust/{agent_id_for_trust}",
+                timeout=2
+            )
+            if tr_resp.status_code == 200:
+                agent_trust = tr_resp.json().get("trust_score", 100.0)
+        except Exception:
+            pass  # trust fetch failure is non-blocking
+
     # Map action_type to policy file and package
     policy_file_map = {
         "FEE_WAIVER": {
@@ -163,13 +210,31 @@ async def policy_evaluate(req: PolicyRequest):
             "file":    os.path.join(os.path.dirname(__file__), "policies", "servicing_disputes.rego"),
             "package": "data.sentinel.servicing_disputes"
         },
+        # ── Razorpay-native policies ──────────────────────────────────────────
+        "REFUND": {
+            "file":    os.path.join(os.path.dirname(__file__), "policies", "razorpay_refund.rego"),
+            "package": "data.sentinel.razorpay_refund"
+        },
+        "PAYOUT": {
+            "file":    os.path.join(os.path.dirname(__file__), "policies", "razorpay_payout.rego"),
+            "package": "data.sentinel.razorpay_payout"
+        },
+        "PAYMENT_CAPTURE": {
+            "file":    os.path.join(os.path.dirname(__file__), "policies", "razorpay_payments.rego"),
+            "package": "data.sentinel.razorpay_payments"
+        },
     }
     
     mapping = policy_file_map.get(req.action_type)
     if not mapping:
         return PolicyResponse(decision="DENY", reason=f"No policy mapped for action: {req.action_type}")
-        
-    result = evaluate_policy(mapping["file"], req.parameters, mapping["package"])
+    
+    # Enrich OPA input with trust score and agent limit so Rego rules can use them
+    enriched_parameters = dict(req.parameters)
+    enriched_parameters["trust_score"]  = agent_trust
+    enriched_parameters["agent_limit"]  = agent_limit or enriched_parameters.get("agent_limit", 999_999_999)
+
+    result = evaluate_policy(mapping["file"], enriched_parameters, mapping["package"])
     
     print(f"[SAFETY SERVICE] OPA Decision: {result['decision']} | Reason: {result['reason']}")
     return PolicyResponse(decision=result["decision"], reason=result["reason"])
@@ -287,6 +352,7 @@ async def killswitch_isolate(req: KillSwitchRequest):
     """
     Module 6.2: Quarantine a single agent immediately.
     All subsequent requests from this agent will be blocked at Gate 0.
+    After quarantine, emits KILL_SWITCH_TRIGGERED trust signal (-20).
     """
     if not req.agent_id:
         raise HTTPException(status_code=400, detail="agent_id is required.")
@@ -296,6 +362,17 @@ async def killswitch_isolate(req: KillSwitchRequest):
     compensation = compensate_and_clear(req.agent_id, audit_callback=append_audit_entry)
     # Write kill event to immutable audit ledger
     _audit_kill_event(req.agent_id, "AGENT_QUARANTINED", {"triggered_by": req.triggered_by})
+    # Wire trust engine: emit KILL_SWITCH_TRIGGERED signal (-20 trust)
+    try:
+        from trust_engine import update_trust
+        trust_result = update_trust(
+            req.agent_id,
+            "KILL_SWITCH_TRIGGERED",
+            f"Kill-switch quarantine triggered by {req.triggered_by}"
+        )
+        print(f"[KILL-SWITCH] Trust updated: {trust_result.get('old_score')} -> {trust_result.get('new_score')} (delta={trust_result.get('delta')})")
+    except Exception as trust_err:
+        print(f"[KILL-SWITCH] Trust signal failed (non-blocking): {trust_err}")
     return {
         **result,
         "in_flight_compensation": compensation or "No in-flight operations found.",
@@ -326,14 +403,28 @@ async def killswitch_fleet_kill(req: KillSwitchRequest):
 async def killswitch_release(req: KillSwitchRequest):
     """
     Module 6.2: Release a quarantined agent back to ACTIVE status.
-    The agent will resume normal operation on its next request.
+    Trust is reset to 50.0 (NOT 100) — agent must rebuild trust through
+    good behaviour. The agent cannot be blindly trusted after an incident.
     """
     if not req.agent_id:
         raise HTTPException(status_code=400, detail="agent_id is required.")
     print(f"\n[KILL-SWITCH] RELEASE signal received for agent: {req.agent_id}")
     result = release_agent(req.agent_id, released_by=req.triggered_by)
     _audit_kill_event(req.agent_id, "AGENT_RELEASED", {"released_by": req.triggered_by})
-    return result
+    # Wire trust engine: reset trust to 50 (not 100) after release
+    try:
+        from trust_engine import set_trust, update_trust
+        set_trust(req.agent_id, 50.0)
+        # Record the recovery event in trust history for the timeline chart
+        update_trust(
+            req.agent_id,
+            "HITL_APPROVED",  # closest positive signal for "admin cleared the agent"
+            f"Agent released from quarantine by {req.triggered_by}. Trust reset to 50."
+        )
+        print(f"[KILL-SWITCH] Trust reset to 50.0 for agent '{req.agent_id}'")
+    except Exception as trust_err:
+        print(f"[KILL-SWITCH] Trust reset failed (non-blocking): {trust_err}")
+    return {**result, "trust_reset_to": 50.0}
 
 @app.get("/api/v1/killswitch/status")
 @app.get("/api/v1/fleet/status")
@@ -946,6 +1037,86 @@ async def behavior_get_timeline(
         "agent_id":  agent_id,
         "count":     len(timeline),
         "timeline":  timeline,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODULE 13: Unified Agent Action Endpoint
+# Wraps the full Sentinel SDK pipeline over HTTP.
+# Frontend demo sandbox and any external caller can fire governed actions
+# without importing the Python SDK directly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AgentActionRequest(BaseModel):
+    action_type: str
+    parameters: Dict[str, Any] = {}
+    trace_id:   Optional[str]  = None
+
+
+@app.post("/api/v1/agents/{agent_id}/action")
+async def agent_action(agent_id: str, req: AgentActionRequest):
+    """
+    Module 13: Unified governed action endpoint.
+    Runs the full Sentinel gate pipeline for a given agent and action.
+    Returns the gate decision plus trust_before / trust_after / trust_delta
+    so callers can observe how trust moves with each action.
+    """
+    print(f"\n[MODULE 13] /action: agent={agent_id} action={req.action_type}")
+
+    # Snapshot trust BEFORE the action
+    trust_before: float = 100.0
+    autonomy_tier: str  = "UNKNOWN"
+    try:
+        tb = get_trust(agent_id)
+        trust_before = tb.get("trust_score", 100.0)
+    except Exception:
+        pass
+    try:
+        aut = get_autonomy_decision(agent_id)
+        autonomy_tier = aut.get("tier", "UNKNOWN")
+    except Exception:
+        pass
+
+    # Inject agent_id into parameters so OPA can do capability checks
+    enriched_params = dict(req.parameters)
+    enriched_params["agent_id"] = agent_id
+
+    # Import and run the SDK inline
+    # We do this inside the request handler to avoid circular import at module load time
+    import sys, os
+    _sdk_dir = os.path.join(os.path.dirname(__file__), "..", "agents-fleet")
+    if _sdk_dir not in sys.path:
+        sys.path.insert(0, _sdk_dir)
+
+    try:
+        from sentinel_sdk import execute_governed_tool
+        gate_result = execute_governed_tool(
+            agent_id=agent_id,
+            action_type=req.action_type,
+            parameters=enriched_params,
+            trace_id=req.trace_id,
+        )
+    except Exception as sdk_err:
+        gate_result = {"status": "ERROR", "reason": str(sdk_err)}
+
+    # Snapshot trust AFTER the action
+    trust_after: float = trust_before
+    try:
+        ta = get_trust(agent_id)
+        trust_after = ta.get("trust_score", trust_before)
+    except Exception:
+        pass
+
+    trust_delta = round(trust_after - trust_before, 2)
+
+    return {
+        **gate_result,
+        "agent_id":      agent_id,
+        "action_type":   req.action_type,
+        "trust_before":  trust_before,
+        "trust_after":   trust_after,
+        "trust_delta":   trust_delta,
+        "autonomy_tier": autonomy_tier,
     }
 
 

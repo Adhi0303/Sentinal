@@ -12,10 +12,10 @@ ENV/
 venv/
 .venv/
 
-# Markdown and Documentation
-*.md
-docs/
-modules/
+# Markdown and Documentation (tracked — allow docs/ and *.md)
+# docs/
+# modules/
+
 tests/
 
 # OS generated files

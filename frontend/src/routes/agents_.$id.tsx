@@ -37,6 +37,7 @@ import {
 import { StatusPill } from "@/components/sentinel/primitives";
 import { AutonomyBadge, TrustScoreBadge } from "@/components/sentinel/autonomy-badge";
 import { Modal, GhostBtn } from "@/components/sentinel/modal";
+import { BehaviorDeviationRadar } from "@/components/sentinel/behavior-deviation";
 
 export const Route = createFileRoute("/agents_/$id")({
   component: AgentDetailPage,
@@ -244,24 +245,34 @@ function BehaviorPanel({
         </div>
       )}
 
-      {/* Deviation score timeline chart */}
+      {/* Deviation score timeline chart & Radar Chart */}
       {chartData.length > 0 && (
-        <div>
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Deviation Score History</p>
-          <div className="h-40 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.07)" />
-                <XAxis dataKey="time" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
-                <RTooltip
-                  formatter={(v: number) => [`${v}/100`, "Deviation Score"]}
-                  contentStyle={{ fontSize: 11, borderRadius: 8 }}
-                />
-                <Bar dataKey="score" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Deviation Score History</p>
+            <div className="h-48 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.07)" />
+                  <XAxis dataKey="time" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickLine={false} />
+                  <RTooltip
+                    formatter={(v: number) => [`${v}/100`, "Deviation Score"]}
+                    contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                  />
+                  <Bar dataKey="score" fill="var(--accent)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
+          {deviation && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Behavior Deviation Radar</p>
+              <div className="h-48 w-full">
+                <BehaviorDeviationRadar deviation={deviation} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 

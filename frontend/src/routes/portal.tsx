@@ -160,7 +160,7 @@ function CustomerPortal() {
   };
 
   const sendMessage = async (text: string) => {
-    if (busy || !text.trim()) return;
+    if (busy || !text.trim() || !user) return;
     setBusy(true);
     setLogs([]);
 

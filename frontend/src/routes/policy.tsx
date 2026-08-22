@@ -65,12 +65,44 @@ function PolicyPage() {
   }
 
   const [form, setForm] = useState({
-    action_type: "FEE_WAIVER",
-    amount: 75,
-    risk_score: 62,
-    reason: "Goodwill waiver",
+    action_type: "REFUND",
+    amount: 2499,
+    risk_score: 18,
+    reason: "Defective item — refund to original payment source",
   });
   const [result, setResult] = useState<PolicyResult | null>(null);
+
+  function selectAction(action_type: string) {
+    const examples: Record<string, Omit<typeof form, "action_type">> = {
+      REFUND: {
+        amount: 2499,
+        risk_score: 18,
+        reason: "Defective item — refund to original payment source",
+      },
+      PAYOUT: {
+        amount: 75000,
+        risk_score: 35,
+        reason: "Verified merchant settlement payout",
+      },
+      PAYMENT_CAPTURE: {
+        amount: 12500,
+        risk_score: 15,
+        reason: "Capture a valid authorised payment",
+      },
+      FEE_WAIVER: {
+        amount: 75,
+        risk_score: 62,
+        reason: "Goodwill waiver",
+      },
+      TRADE: {
+        amount: 5000,
+        risk_score: 20,
+        reason: "Treasury trade within mandate",
+      },
+    };
+    setResult(null);
+    setForm({ action_type, ...(examples[action_type] ?? examples.REFUND) });
+  }
 
   return (
     <div className="space-y-4">
@@ -220,15 +252,15 @@ function PolicyPage() {
               <Field label="Action Type">
                 <select
                   value={form.action_type}
-                  onChange={(e) => setForm({ ...form, action_type: e.target.value })}
+                  onChange={(e) => selectAction(e.target.value)}
                   className="w-full rounded-md border border-border bg-surface-elevated px-2.5 py-2 text-[13px] outline-none"
                 >
-                  {["FEE_WAIVER", "TRADE", "REFUND"].map((o) => (
+                  {["REFUND", "PAYOUT", "PAYMENT_CAPTURE", "FEE_WAIVER", "TRADE"].map((o) => (
                     <option key={o}>{o}</option>
                   ))}
                 </select>
               </Field>
-              <Field label="Amount ($)">
+              <Field label={form.action_type === "REFUND" || form.action_type === "PAYOUT" || form.action_type === "PAYMENT_CAPTURE" ? "Amount (₹)" : "Amount ($)"}>
                 <input
                   type="number"
                   value={form.amount}

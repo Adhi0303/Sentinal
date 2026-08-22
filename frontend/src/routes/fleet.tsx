@@ -125,7 +125,7 @@ function FleetPage() {
                   </button>
                 )}
                 <button
-                  onClick={() => navigate({ to: "/agents_/$id", params: { id: a.agent_id } })}
+                  onClick={() => navigate({ to: "/agents/$id", params: { id: a.agent_id } })}
                   className="rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-link hover:bg-accent"
                 >
                    Details

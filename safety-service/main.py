@@ -621,6 +621,7 @@ class DemoChatRequest(BaseModel):
     message: str
     account_id: Optional[str] = "acc_123"
     use_poisoned_rag: Optional[bool] = False
+    agent_type: Optional[str] = "customer_service_agent"
 
 @app.post("/api/v1/demo/chat")
 async def demo_chat(req: DemoChatRequest):
@@ -667,13 +668,14 @@ async def demo_chat(req: DemoChatRequest):
                 import importlib
                 import importlib.util
                 # Load agent fresh each call so module-level globals reset
+                agent_filename = f"{req.agent_type}.py"
                 spec = importlib.util.spec_from_file_location(
-                    "customer_service_agent",
-                    os.path.join(agents_dir, "customer_service_agent.py")
+                    req.agent_type,
+                    os.path.join(agents_dir, agent_filename)
                 )
-                csa = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(csa)
-                reply = csa.run_agent(req.message, account_id=req.account_id, use_poisoned_rag=req.use_poisoned_rag)
+                agent_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(agent_module)
+                reply = agent_module.run_agent(req.message, account_id=req.account_id, use_poisoned_rag=req.use_poisoned_rag)
 
             telemetry_q.put({"type": "reply", "text": reply or "Done."})
         except Exception as e:

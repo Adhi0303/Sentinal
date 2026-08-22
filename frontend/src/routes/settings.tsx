@@ -14,7 +14,17 @@ import {
 } from "lucide-react";
 
 import { SectionLabel, PulseDot } from "@/components/sentinel/primitives";
-import { DEFAULT_API_BASE, getApiBase, setApiBase } from "@/lib/sentinel";
+import {
+  DEFAULT_API_BASE,
+  fetchAutonomyTiers,
+  fetchTrustWeights,
+  getApiBase,
+  setApiBase,
+  updateAutonomyTiers,
+  updateTrustWeights,
+  type AutonomyTiers,
+  type TrustWeights,
+} from "@/lib/sentinel";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -52,13 +62,15 @@ function SettingsPage() {
   const [base, setBase] = useState(
     typeof window === "undefined" ? DEFAULT_API_BASE : getApiBase(),
   );
-  const [thresholds, setThresholds] = useState({
-    hitl: 50,
-    block: 70,
-    depth: 4,
-    rate: 100,
-    ttl: 24,
+  const [tiers, setTiers] = useState<AutonomyTiers>({
+    FULL: 90,
+    BOUNDED: 70,
+    HITL: 40,
+    QUARANTINE: 0,
   });
+  const [weights, setWeights] = useState<TrustWeights>({});
+  const [governanceLoading, setGovernanceLoading] = useState(true);
+  const [governanceSaving, setGovernanceSaving] = useState(false);
 
   // Splunk state
   const [splunk, setSplunk] = useState<SplunkConfig>({
@@ -87,6 +99,37 @@ function SettingsPage() {
       })
       .finally(() => setSplunkLoading(false));
   }, []);
+
+  useEffect(() => {
+    Promise.all([fetchAutonomyTiers(), fetchTrustWeights()])
+      .then(([liveTiers, liveWeights]) => {
+        if (liveTiers) setTiers(liveTiers);
+        if (liveWeights) setWeights(liveWeights);
+      })
+      .finally(() => setGovernanceLoading(false));
+  }, []);
+
+  const saveGovernanceConfig = async () => {
+    setGovernanceSaving(true);
+    const [savedTiers, savedWeights] = await Promise.all([
+      updateAutonomyTiers(tiers),
+      updateTrustWeights(weights),
+    ]);
+    setGovernanceSaving(false);
+
+    if (!savedTiers || !savedWeights) {
+      toast.error("Could not save governance controls", {
+        description: "Check that the Sentinel Safety Service and Redis are running.",
+      });
+      return;
+    }
+
+    setTiers(savedTiers);
+    setWeights(savedWeights);
+    toast.success("Governance controls saved", {
+      description: "New autonomy thresholds and trust weights apply to subsequent actions.",
+    });
+  };
 
   const saveSplunkConfig = async () => {
     setSplunkSaving(true);
@@ -166,36 +209,62 @@ function SettingsPage() {
         </button>
       </section>
 
-      {/* Alert Thresholds */}
+      {/* Redis-backed governance controls */}
       <section className="panel p-5">
-        <SectionLabel>Alert Thresholds</SectionLabel>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Num
-            label="HITL Threshold (Risk Score)"
-            value={thresholds.hitl}
-            onChange={(v) => setThresholds({ ...thresholds, hitl: v })}
-          />
-          <Num
-            label="Hard Block Threshold"
-            value={thresholds.block}
-            onChange={(v) => setThresholds({ ...thresholds, block: v })}
-          />
-          <Num
-            label="Max Agent Depth"
-            value={thresholds.depth}
-            onChange={(v) => setThresholds({ ...thresholds, depth: v })}
-          />
-          <Num
-            label="Rate Limit ($/min)"
-            value={thresholds.rate}
-            onChange={(v) => setThresholds({ ...thresholds, rate: v })}
-          />
-          <Num
-            label="Idempotency TTL (hours)"
-            value={thresholds.ttl}
-            onChange={(v) => setThresholds({ ...thresholds, ttl: v })}
-          />
-        </div>
+        <SectionLabel>Live Governance Controls</SectionLabel>
+        <p className="mb-4 text-[12px] text-muted-foreground">
+          These values are persisted in Redis and applied by the Safety Service to every governed action.
+        </p>
+        {governanceLoading ? (
+          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> Loading live governance configuration...
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Num
+                label="FULL autonomy at trust ≥"
+                value={tiers.FULL}
+                onChange={(v) => setTiers({ ...tiers, FULL: v })}
+              />
+              <Num
+                label="BOUNDED autonomy at trust ≥"
+                value={tiers.BOUNDED}
+                onChange={(v) => setTiers({ ...tiers, BOUNDED: v })}
+              />
+              <Num
+                label="HITL autonomy at trust ≥"
+                value={tiers.HITL}
+                onChange={(v) => setTiers({ ...tiers, HITL: v })}
+              />
+              <Num
+                label="QUARANTINE below trust"
+                value={tiers.QUARANTINE}
+                onChange={(v) => setTiers({ ...tiers, QUARANTINE: v })}
+              />
+            </div>
+            <div className="mt-5">
+              <p className="mb-3 text-[11.5px] font-semibold text-muted-foreground">Trust signal deltas</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {Object.entries(weights).map(([signal, value]) => (
+                  <Num
+                    key={signal}
+                    label={signal.replace(/_/g, " ")}
+                    value={value}
+                    onChange={(next) => setWeights({ ...weights, [signal]: next })}
+                  />
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={saveGovernanceConfig}
+              disabled={governanceSaving}
+              className="btn-pill btn-primary mt-5 text-[13px] disabled:opacity-50"
+            >
+              {governanceSaving ? "Saving controls..." : "Save governance controls"}
+            </button>
+          </>
+        )}
       </section>
 
       {/* ── Splunk SIEM Section ───────────────────────────────────────────────── */}

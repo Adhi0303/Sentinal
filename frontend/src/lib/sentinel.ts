@@ -484,7 +484,41 @@ export async function evaluatePolicy(input: {
   risk_score: number;
   reason: string;
 }): Promise<PolicyResult> {
-  // Backend: POST { action_type, parameters: { amount, risk_score, reason, ... } }
+  // OPA policies use action-specific data in addition to the common fields.
+  // Keep those defaults here so the simulator exercises the live Razorpay
+  // policies rather than receiving a Rego "missing input" failure and falling
+  // back to the legacy local simulation.
+  const policyParameters: Record<string, unknown> = {
+    ...input,
+    agent_limit: 999_999_999,
+    trust_score: 100,
+  };
+
+  if (input.action_type === "REFUND") {
+    Object.assign(policyParameters, {
+      payment_id: "pay_zoo002",
+      refund_destination: "original_source",
+      original_payment_source: "original_source",
+      already_refunded: false,
+    });
+  } else if (input.action_type === "PAYOUT") {
+    Object.assign(policyParameters, {
+      merchant_id: "merch_quickPay",
+      destination_account: "acc_quickpay_settlement",
+      destination_verified: true,
+      action: "initiate_payout",
+    });
+  } else if (input.action_type === "PAYMENT_CAPTURE") {
+    Object.assign(policyParameters, {
+      payment_id: "pay_zoo_auth001",
+      payment_status: "AUTHORIZED",
+      authorized_amount: input.amount,
+      payment_age_hours: 24,
+      already_captured: false,
+    });
+  }
+
+  // Backend: POST { action_type, parameters }
   // Returns: { decision, reason, rule? }
   const live = await tryApi<{ decision: string; reason: string; rule?: string }>(
     `/api/v1/policy/evaluate`,
@@ -492,11 +526,7 @@ export async function evaluatePolicy(input: {
       method: "POST",
       body: JSON.stringify({
         action_type: input.action_type,
-        parameters:  input,
-        risk_score:  input.risk_score,
-        risk_level:  input.risk_score >= 70 ? "CRITICAL" : input.risk_score >= 50 ? "HIGH" : "LOW",
-        agent_id:    "hitl_console",
-        trade_value: input.amount,
+        parameters:  policyParameters,
       }),
     },
   );
@@ -766,6 +796,38 @@ export async function pushTrustSignal(
     method: "POST",
     body: JSON.stringify({ signal_event: signalEvent, reason }),
   });
+}
+
+/** Redis-backed trust-signal deltas used by the Safety Service. */
+export type TrustWeights = Record<string, number>;
+
+export async function fetchTrustWeights(): Promise<TrustWeights | null> {
+  const response = await tryApi<{ weights: TrustWeights }>(`/api/v1/trust/weights`);
+  return response?.weights ?? null;
+}
+
+export async function updateTrustWeights(weights: TrustWeights): Promise<TrustWeights | null> {
+  const response = await tryApi<{ weights: TrustWeights }>(`/api/v1/trust/weights`, {
+    method: "PUT",
+    body: JSON.stringify({ weights }),
+  });
+  return response?.weights ?? null;
+}
+
+/** Redis-backed minimum trust score for each autonomy tier. */
+export type AutonomyTiers = Record<"FULL" | "BOUNDED" | "HITL" | "QUARANTINE", number>;
+
+export async function fetchAutonomyTiers(): Promise<AutonomyTiers | null> {
+  const response = await tryApi<{ tiers: AutonomyTiers }>(`/api/v1/autonomy/tiers`);
+  return response?.tiers ?? null;
+}
+
+export async function updateAutonomyTiers(tiers: Partial<AutonomyTiers>): Promise<AutonomyTiers | null> {
+  const response = await tryApi<{ tiers: AutonomyTiers }>(`/api/v1/autonomy/tiers`, {
+    method: "PUT",
+    body: JSON.stringify({ tiers }),
+  });
+  return response?.tiers ?? null;
 }
 
 /**

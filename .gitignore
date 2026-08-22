@@ -21,3 +21,15 @@ tests/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Hackathon Unwanted Folders
+tasks/
+Development_docs/
+modules/
+.agents/
+.vscode/
+frontend/node_modules/
+frontend/dist/
+frontend/.output/
+frontend/.nitro/
+frontend/.wrangler/

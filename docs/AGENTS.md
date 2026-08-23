@@ -11,20 +11,20 @@ Every agent must import and use `agents-fleet/sentinel_sdk.py`. When an agent de
 
 We have tailored the fleet to support a Razorpay-style merchant ecosystem.
 
-### 1. ZoopCart Refund Agent (`refund_agent.py`)
+### 1. Refund Agent (`refund_agent.py`)
 - **Agent ID**: `refund-agent-001`
 - **Capabilities**: `GET_PAYMENT`, `GET_ORDER`, `REFUND`, `PAYMENT_CAPTURE`
-- **Role**: Handles customer service requests for the fictional merchant "ZoopCart". It can look up payments and issue partial or full refunds. If it attempts to refund an amount greater than the original order, Sentinel's Rego policies will catch and block it.
+- **Role**: Handles customer service requests for a fictional merchant. It can look up payments and issue partial or full refunds. If it attempts to refund an amount greater than the original order, Sentinel's Rego policies will catch and block it.
 
-### 2. QuickPay Settlement Agent (`settlement_agent.py`)
+### 2. Settlement Agent (`settlement_agent.py`)
 - **Agent ID**: `settlement-agent-001`
 - **Capabilities**: `GET_BALANCE`, `GET_SETTLEMENT`, `PAYOUT`
-- **Role**: Manages B2B vendor payouts for the fictional merchant "QuickPay". It executes large money movements (payouts). Due to the high-value nature of payouts, its actions frequently trigger the HITL (Human-in-the-Loop) gate, requiring an operator to approve the transaction on the dashboard.
+- **Role**: Manages B2B vendor payouts for a fictional merchant. It executes large money movements (payouts). Due to the high-value nature of payouts, its actions frequently trigger the HITL (Human-in-the-Loop) gate, requiring an operator to approve the transaction on the dashboard.
 
-### 3. SaasHub Fraud Agent (`fraud_analysis_agent.py`)
+### 3. Fraud Agent (`fraud_analysis_agent.py`)
 - **Agent ID**: `fraud-agent-001`
 - **Capabilities**: `GET_PAYMENT`, `GET_TRANSACTIONS`, `PAYMENT_CAPTURE`
-- **Role**: Monitors suspected fraudulent transactions for "SaasHub". It can look up historical transactions to identify patterns and capture authorized payments once they are deemed safe.
+- **Role**: Monitors suspected fraudulent transactions for a fictional merchant. It can look up historical transactions to identify patterns and capture authorized payments once they are deemed safe.
 
 ## Agent Architecture (LangChain + Groq)
 

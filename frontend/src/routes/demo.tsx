@@ -33,9 +33,9 @@ const PRESETS: Array<{ label: string; prompt: string; agent: string; poisoned?: 
 ];
 
 const AGENTS = [
-  { id: "refund_agent", label: "ZoopCart Refunds" },
-  { id: "settlement_agent", label: "QuickPay Settlements" },
-  { id: "fraud_analysis_agent", label: "SaasHub Fraud" },
+  { id: "refund_agent", label: "Refunds" },
+  { id: "settlement_agent", label: "Settlements" },
+  { id: "fraud_analysis_agent", label: "Fraud Analysis" },
 ];
 
 interface Msg {

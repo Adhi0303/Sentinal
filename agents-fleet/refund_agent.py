@@ -1,7 +1,7 @@
 """
 Refund Agent — Sentinel Razorpay Edition
 =========================================
-Governs ZoopCart (e-commerce) refund operations.
+Governs refund operations.
 Registered capabilities: get_payment, get_order, initiate_refund
 LLM: GROQ_DEFAULT_MODEL (openai/gpt-oss-120b) — tool-calling primary
 
@@ -18,7 +18,7 @@ from sentinel_sdk import execute_governed_tool, start_agent_trace
 from llm_config import get_llm_with_tools, GROQ_DEFAULT_MODEL
 
 AGENT_ID    = "refund-agent-001"
-AGENT_NAME  = "ZoopCart Refund Agent"
+AGENT_NAME  = "Refund Agent"
 MERCHANT_ID = "merch_zoopCart"
 SAFETY_SERVICE_URL = "http://localhost:8001/api/v1"
 BANKING_API_URL    = "http://localhost:8000/api/v1"
@@ -43,7 +43,7 @@ def register_on_startup() -> dict:
         ],
         "financial_limit_per_tx": 10_000.0,  # ₹10,000 per Razorpay refund policy
         "autonomy_tier": "BOUNDED",
-        "description": "Processes customer refund requests for ZoopCart e-commerce orders. Governed by OPA razorpay_refund policy.",
+        "description": "Processes customer refund requests for e-commerce orders. Governed by OPA razorpay_refund policy.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
@@ -125,7 +125,7 @@ def initiate_refund(payment_id: str, amount: float, reason: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 TOOLS = [get_payment_details, get_order_details, initiate_refund]
 
-SYSTEM_PROMPT = f"""You are the Sentinel-governed Refund Agent for ZoopCart, a Razorpay merchant.
+SYSTEM_PROMPT = f"""You are the Sentinel-governed Refund Agent for a Razorpay merchant.
 
 Your job is to process customer refund requests safely and accurately.
 
@@ -138,7 +138,7 @@ Guidelines:
 6. Report the refund_id and status clearly to the customer.
 
 Agent ID: {AGENT_ID}
-Merchant: ZoopCart ({MERCHANT_ID})
+Merchant: Store ({MERCHANT_ID})
 """
 
 

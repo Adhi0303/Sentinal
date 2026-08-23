@@ -819,7 +819,7 @@ async def agents_list(
 ):
     """
     List all registered agents with live trust score + autonomy tier.
-    Filter by ?status=ACTIVE or ?owner=ZoopCart.
+    Filter by ?status=ACTIVE or ?owner=Refund Agent.
     """
     agents = list_agents(status=status, owner=owner)
     for a in agents:

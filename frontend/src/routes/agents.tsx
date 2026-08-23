@@ -96,7 +96,7 @@ function RegisterForm({ onClose }: { onClose: () => void }) {
             <input
               value={form.name ?? ""}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="ZoopCart Refund Agent"
+              placeholder="Refund Agent"
               className="w-full rounded-[12px] border border-border bg-white/50 px-3 py-2.5 text-[13px] outline-none focus:border-accent"
             />
           </div>
@@ -105,7 +105,7 @@ function RegisterForm({ onClose }: { onClose: () => void }) {
             <input
               value={form.owner ?? ""}
               onChange={(e) => set("owner", e.target.value)}
-              placeholder="ZoopCart"
+              placeholder="Refund Merchant"
               className="w-full rounded-[12px] border border-border bg-white/50 px-3 py-2.5 text-[13px] outline-none focus:border-accent"
             />
           </div>

@@ -14,13 +14,13 @@ import type { AuditEntry } from "@/lib/sentinel";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Overview — Sentinel Gateway AI Safety Console" },
+      { title: "Sentinel — Razorpay AI Governance" },
       {
         name: "description",
         content:
           "Real-time overview of guarded AI agent requests, blocked threats, HITL escalations and protected spend.",
       },
-      { property: "og:title", content: "Overview — Sentinel Gateway" },
+      { property: "og:title", content: "Sentinel — Razorpay AI Governance" },
       {
         property: "og:description",
         content: "Live monitor for every intercepted AI agent decision.",

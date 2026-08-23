@@ -26,9 +26,9 @@ Sentinel acts as an inline, zero trust sidecar and governance gateway between au
 ```mermaid
 graph TD
     subgraph "AI Agent Fleet"
-        A1["Refund Agent (ZoopCart)"]
-        A2["Settlement Agent (QuickPay)"]
-        A3["Fraud Analysis Agent (SaasHub)"]
+        A1["Refund Agent"]
+        A2["Settlement Agent"]
+        A3["Fraud Analysis Agent"]
         SDK["Sentinel SDK"]
     end
 

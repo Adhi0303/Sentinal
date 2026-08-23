@@ -78,10 +78,10 @@ const AGENT_NAMES: Record<string, string> = {
   agent_procurement_001:      "Procurement Agent",
   agent_underwriting_001:     "Underwriting Agent",
   // Razorpay fleet
-  "refund-agent-001":         "ZoopCart Refund Agent",
-  "settlement-agent-001":     "QuickPay Settlement Agent",
+  "refund-agent-001":         "Refund Agent",
+  "settlement-agent-001":     "Settlement Agent",
   "support-agent-001":        "FoodieApp Support Agent",
-  "fraud-analysis-agent-001": "SaasHub Fraud Analysis Agent",
+  "fraud-analysis-agent-001": "Fraud Analysis Agent",
 };
 
 // ─── API configuration ──────────────────────────────────────────────────────

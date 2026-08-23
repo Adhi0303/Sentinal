@@ -1,7 +1,7 @@
 """
 Settlement Agent — Sentinel Razorpay Edition
 =============================================
-Governs QuickPay (payment aggregator) settlement and payout operations.
+Governs settlement and payout operations.
 Registered capabilities: get_balance, initiate_payout, get_settlement
 LLM: GROQ_DEFAULT_MODEL (openai/gpt-oss-120b)
 
@@ -17,7 +17,7 @@ from sentinel_sdk import execute_governed_tool, start_agent_trace
 from llm_config import get_llm_with_tools, GROQ_DEFAULT_MODEL
 
 AGENT_ID    = "settlement-agent-001"
-AGENT_NAME  = "QuickPay Settlement Agent"
+AGENT_NAME  = "Settlement Agent"
 MERCHANT_ID = "merch_quickPay"
 SAFETY_SERVICE_URL = "http://localhost:8001/api/v1"
 BANKING_API_URL    = "http://localhost:8000/api/v1"
@@ -35,8 +35,8 @@ def register_on_startup() -> dict:
             "PAYOUT", "WIRE_TRANSFER"
         ],
         "financial_limit_per_tx": 1_00_000.0,  # ₹1,00,000 per payout
-        "autonomy_tier": "HITL",               # QuickPay is an aggregator — always HITL
-        "description": "Processes merchant settlements and payouts for QuickPay. High-value operations require human approval.",
+        "autonomy_tier": "HITL",               # Aggregator — always HITL
+        "description": "Processes merchant settlements and payouts. High-value operations require human approval.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
@@ -112,7 +112,7 @@ def initiate_payout(merchant_id: str, amount: float, destination_account: str, r
 
 TOOLS = [get_merchant_balance, get_merchant_payments, initiate_payout]
 
-SYSTEM_PROMPT = f"""You are the Sentinel-governed Settlement Agent for QuickPay, a Razorpay payment aggregator.
+SYSTEM_PROMPT = f"""You are the Sentinel-governed Settlement Agent for a Razorpay payment aggregator.
 
 Your job is to process merchant settlement payouts accurately and securely.
 
@@ -125,7 +125,7 @@ Guidelines:
 6. Report the payout status and reference clearly.
 
 Agent ID: {AGENT_ID}
-Merchant: QuickPay ({MERCHANT_ID})
+Merchant: Aggregator ({MERCHANT_ID})
 """
 
 

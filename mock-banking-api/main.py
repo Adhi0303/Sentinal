@@ -141,7 +141,7 @@ accounts = {
 # ─────────────────────────────────────────────────────────────────────────────
 razorpay_merchants = {
     "merch_zoopCart": {
-        "name":            "ZoopCart",
+        "name":            "Refund Merchant",
         "type":            "E_COMMERCE",
         "status":          "ACTIVE",
         "balance_inr":     2_50_000.0,   # ₹2,50,000
@@ -184,7 +184,7 @@ razorpay_merchants = {
         ]
     },
     "merch_saasHub": {
-        "name":            "SaasHub",
+        "name":            "Fraud Merchant",
         "type":            "B2B_SAAS",
         "status":          "ACTIVE",
         "balance_inr":     18_00_000.0,   # ₹18,00,000
@@ -201,7 +201,7 @@ razorpay_merchants = {
         ]
     },
     "merch_quickPay": {
-        "name":            "QuickPay",
+        "name":            "Settlement Merchant",
         "type":            "PAYMENT_AGGREGATOR",
         "status":          "ACTIVE",
         "balance_inr":     50_00_000.0,   # ₹50,00,000
@@ -581,7 +581,7 @@ def _get_payment_from_any_merchant(payment_id: str) -> tuple:
 def get_merchant_balance(merchant_id: str):
     """
     Module 9: Get real-time merchant settlement balance.
-    Used by SettlementAgent (QuickPay) and fraud analysis.
+    Used by SettlementAgent and fraud analysis.
     """
     merch = _get_merchant(merchant_id)
     return {
@@ -616,7 +616,7 @@ def list_merchants():
 def refund_payment(payment_id: str, request: RefundRequest):
     """
     Module 9: Process a refund for a captured Razorpay payment.
-    Used by the RefundAgent (ZoopCart). Must be called via Sentinel SDK.
+    Used by the RefundAgent. Must be called via Sentinel SDK.
     Business rules enforced here are a last-resort check; OPA Rego is the
     primary policy gate.
     """
@@ -747,7 +747,7 @@ def get_merchant_transactions(merchant_id: str):
 def initiate_payout(request: PayoutRequest):
     """
     Module 9: Initiate a merchant settlement payout.
-    Used by SettlementAgent (QuickPay). Must be called via Sentinel SDK.
+    Used by SettlementAgent. Must be called via Sentinel SDK.
     Business rule: destination_verified must be True (mirrors razorpay_payout.rego).
     """
     merch = _get_merchant(request.merchant_id)
@@ -792,7 +792,7 @@ def capture_payment(payment_id: str, amount: float = None):
     """
     Module 9: Capture an AUTHORIZED Razorpay payment.
     Transitions payment from AUTHORIZED → CAPTURED, making it eligible for refund.
-    Used by FraudAnalysisAgent (SaasHub) to confirm legitimate transactions.
+    Used by FraudAnalysisAgent to confirm legitimate transactions.
     """
     merchant_id, payment = _get_payment_from_any_merchant(payment_id)
 

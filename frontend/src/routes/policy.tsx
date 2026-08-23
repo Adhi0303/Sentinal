@@ -222,7 +222,7 @@ function PolicyPage() {
                       ) : (
                         <StatusPill token="info">Archived</StatusPill>
                       )}
-                      <span className="mono text-[11px] text-muted-foreground">
+                      <span suppressHydrationWarning className="mono text-[11px] text-muted-foreground">
                         {new Date(v.ts).toLocaleString()} · {v.author} · {v.rules.length} rules
                       </span>
                       {!live && (

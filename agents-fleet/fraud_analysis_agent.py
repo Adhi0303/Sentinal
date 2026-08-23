@@ -1,7 +1,7 @@
 """
 Fraud Analysis Agent — Sentinel Razorpay Edition
 =================================================
-Governs SaasHub (B2B SaaS) transaction monitoring and fraud flagging.
+Governs transaction monitoring and fraud flagging.
 Registered capabilities: get_transactions, flag_transaction, get_merchant_stats
 LLM: GROQ_REASONING_MODEL (qwen/qwen3.6-27b) — CoT reasoning for anomaly detection
 
@@ -17,7 +17,7 @@ from sentinel_sdk import execute_governed_tool, start_agent_trace
 from llm_config import get_llm_with_tools, GROQ_REASONING_MODEL
 
 AGENT_ID    = "fraud-analysis-agent-001"
-AGENT_NAME  = "SaasHub Fraud Analysis Agent"
+AGENT_NAME  = "Fraud Analysis Agent"
 MERCHANT_ID = "merch_saasHub"
 SAFETY_SERVICE_URL = "http://localhost:8001/api/v1"
 BANKING_API_URL    = "http://localhost:8000/api/v1"
@@ -38,7 +38,7 @@ def register_on_startup() -> dict:
         ],
         "financial_limit_per_tx": 0.0,   # analysis-only — no direct financial authority
         "autonomy_tier": "BOUNDED",
-        "description": "Monitors SaasHub B2B transactions for anomalies and fraud patterns. Flags suspicious activity for human review.",
+        "description": "Monitors B2B transactions for anomalies and fraud patterns. Flags suspicious activity for human review.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
@@ -134,7 +134,7 @@ def get_flagged_transactions() -> str:
 
 TOOLS = [get_merchant_transactions, get_merchant_stats, flag_transaction, get_flagged_transactions]
 
-SYSTEM_PROMPT = f"""You are the Sentinel-governed Fraud Analysis Agent for SaasHub, a Razorpay B2B SaaS merchant.
+SYSTEM_PROMPT = f"""You are the Sentinel-governed Fraud Analysis Agent for a Razorpay B2B SaaS merchant.
 
 Your job is to analyze transaction patterns and identify potential fraud or policy violations.
 
@@ -152,7 +152,7 @@ Guidelines:
 5. Be precise — false positives erode merchant trust.
 
 Agent ID: {AGENT_ID}
-Merchant: SaasHub ({MERCHANT_ID})
+Merchant: Platform ({MERCHANT_ID})
 """
 
 

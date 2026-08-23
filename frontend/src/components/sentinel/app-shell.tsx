@@ -260,12 +260,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Top Right Controls */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3 mr-4">
-              <button className="grid size-10 place-items-center rounded-full glass hover-lift text-muted-foreground hover:text-foreground">
-                <Mail className="size-4" strokeWidth={1.8} />
-              </button>
-              <button className="grid size-10 place-items-center rounded-full glass hover-lift text-muted-foreground hover:text-foreground">
-                <Bell className="size-4" strokeWidth={1.8} />
-              </button>
+
               <button
                 onClick={handleLogout}
                 title="Sign out"

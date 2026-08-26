@@ -36,17 +36,19 @@ def register_on_startup() -> dict:
         "allowed_tools": [
             "GET_TRANSACTIONS", "FLAG_TRANSACTION", "GET_MERCHANT_STATS"
         ],
+        "model": GROQ_REASONING_MODEL,
         "financial_limit_per_tx": 0.0,   # analysis-only — no direct financial authority
+        "daily_budget": 0.0,
         "autonomy_tier": "BOUNDED",
-        "description": "Monitors B2B transactions for anomalies and fraud patterns. Flags suspicious activity for human review.",
+        "purpose": "Monitors B2B transactions for anomalies and fraud patterns. Flags suspicious activity for human review.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
         if resp.status_code in (200, 201):
-            print(f"[{AGENT_ID}] Registered with Sentinel Registry ✓")
+            print(f"[{AGENT_ID}] Registered with Sentinel Registry [SUCCESS]")
             return resp.json()
         elif resp.status_code == 409:
-            print(f"[{AGENT_ID}] Already registered ✓")
+            print(f"[{AGENT_ID}] Already registered [SUCCESS]")
             return {"status": "already_registered"}
         else:
             print(f"[{AGENT_ID}] Registration warning: {resp.status_code}")
@@ -156,7 +158,7 @@ Merchant: Platform ({MERCHANT_ID})
 """
 
 
-def run_agent(user_request: str) -> str:
+def run_agent(user_request: str, **kwargs) -> str:
     """Run the FraudAnalysisAgent for a single request. Returns the final response."""
     print(f"\n{'='*60}")
     print(f"[{AGENT_NAME}] Processing: {user_request[:80]}")

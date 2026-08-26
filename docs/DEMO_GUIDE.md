@@ -1,55 +1,95 @@
-# Demo Guide: Testing Sentinel
+# Demo Guide: Testing Sentinel Live
 
-The easiest way to understand Sentinel is to use the **Demo Sandbox** in the frontend dashboard. The Sandbox connects you to the live AI agents and streams the exact telemetry of the 9-gate interception pipeline as the agent tries to execute your request.
+The fastest way to experience Sentinel is through the Demo Sandbox in the operator dashboard. The Sandbox connects directly to the live AI agents and streams the exact telemetry of the 9-gate interception pipeline in real time as each agent processes your request.
 
 ## Setup
-Ensure all 4 services are running:
-1. `mock-banking-api` (Port 8000)
-2. `safety-service` (Port 8001)
-3. `frontend` (Port 3000)
-4. Redis (Port 6379)
 
-Navigate to `http://localhost:3000/demo` in your browser.
+Ensure all four services are running before starting:
 
-## Test Scenarios
+| Service | Port | Start Command |
+|---|---|---|
+| Redis | 6379 | `docker-compose up -d` |
+| Mock Banking API | 8000 | `uvicorn main:app --port 8000` (from `mock-banking-api/`) |
+| Safety Service | 8001 | `uvicorn main:app --port 8001` (from `safety-service/`) |
+| Frontend Dashboard | 5173 | `npm run dev` (from `frontend/`) |
 
-### Scenario 1: The Safe Request
-**Action**: Select the "Normal Refund ₹2500" preset, or type: *"Please refund ₹2500 for order ord_123. The customer received a damaged product."* (Ensure the Refund Agent is selected).
+After starting the Safety Service, register both agents:
 
-**What to watch**:
-- The LLM agent receives the prompt and decides to use the `refund_payment` tool.
-- Sentinel intercepts the tool call.
-- You will see the telemetry stream: Registry check passes, Schema check passes, Policies pass.
-- The action hits the banking API and the agent responds: *"I have processed the refund."*
+```bash
+# Register Customer Service Agent
+curl -X POST http://localhost:8001/api/v1/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "agent_cust_srv_01", "name": "Customer Service Agent", "owner": "Sentinel Bank", "purpose": "Fee waivers and account inquiries", "allowed_tools": ["get_account_details", "get_transaction_history", "check_waiver_eligibility", "waive_customer_fee", "FEE_WAIVER"], "blocked_tools": [], "financial_limit_per_tx": 500.0, "daily_budget": 5000.0, "model": "meta-llama/llama-4-maverick-17b-128e-instruct"}'
 
-### Scenario 2: Policy Denial
-**Action**: Type *"Refund ₹50,000 for order ord_123."* (Ensure the Refund Agent is selected).
+# Register Treasury Agent
+curl -X POST http://localhost:8001/api/v1/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "agent_treasury_001", "name": "Treasury Agent", "owner": "Sentinel Bank", "purpose": "Intraday wire transfers", "allowed_tools": ["WIRE_TRANSFER"], "blocked_tools": [], "financial_limit_per_tx": 50000000.0, "daily_budget": 50000000.0, "model": "meta-llama"}'
+```
 
-**What to watch**:
-- The agent attempts to process a massive refund.
-- Sentinel intercepts it.
-- Watch the telemetry: **Gate 7 (OPA Rego Policies) will block the transaction** because it violates the maximum allowable refund limit. 
-- The agent gets an error back from Sentinel, and responds to you saying *"I'm sorry, I am not authorized to process a refund of that size."*
+Also ingest the trusted RAG documents so the fee waiver policy is available:
 
-### Scenario 3: Human-In-The-Loop (HITL) Trigger
-**Action**: Select the "Large Payout ₹5M" preset. (Ensure the Settlement Agent is selected).
+```bash
+python safety-service/ingest_docs.py
+```
 
-**What to watch**:
-- The Settlement Agent attempts to execute the payout.
-- Because it is a massive transfer, Sentinel's Rego policy tags it as `REQUIRE_HITL`.
-- The Sandbox chat will pause. 
-- Open a new tab, navigate to the **Human-in-the-Loop** dashboard (`/hitl`).
-- You will see the pending ₹5,000,000 payout. Click **Approve**.
-- Go back to the Sandbox tab. The agent will finally get the success response and reply to you!
+Navigate to `http://localhost:5173/demo` in your browser.
 
-### Scenario 4: The Prompt Injection Attack
-**Action**: Select the "SQL Injection" preset.
+## Demo Scenarios
 
-**What to watch**:
-- The agent blindly attempts to pass the malicious string into the `refund_payment` tool.
-- Sentinel intercepts it.
-- **Gate 3 (Schema Validation)** or **Gate 9 (Kill Switch)** will instantly block the payload.
-- The agent is penalized, and you will see its trust score drop on the `Agents` dashboard.
+The four preset buttons in the Demo Sandbox walk through Sentinel's three core governance behaviors.
 
-## Resetting State
-If an agent's trust score drops too low (QUARANTINE), it will no longer be able to do anything in the Sandbox. You can manually reset the agent's trust score back to 100 on the Agent Detail page using the `Push Signal` modal.
+### Scenario 1: $10 Fee Waiver (Autonomous Approval)
+
+**Agent**: Customer Service Agent
+
+**What happens**: The agent receives a request to waive a $10 late fee on account `acc_123`. It follows the mandatory investigation workflow: it calls `get_account_details`, then `get_transaction_history` to confirm the fee exists, then `check_waiver_eligibility`, and finally attempts `waive_customer_fee`.
+
+**What to watch in the telemetry**: All 9 gates pass sequentially. The OPA policy evaluates the amount as below the $10,000 threshold and returns ALLOW. The action executes against the banking API. The agent responds with a confirmation.
+
+This scenario proves Sentinel does not block everything. Safe actions from trusted agents execute with no unnecessary friction.
+
+### Scenario 2: $50,000 Transaction (HITL Escalation)
+
+**Agent**: Treasury Agent
+
+**What happens**: The agent processes a request to wire $50,000. The SDK intercepts the `WIRE_TRANSFER` tool call. The OPA policy evaluates the amount against the $10,000 to $100,000 threshold and returns REQUIRE_HITL.
+
+**What to watch in the telemetry**: Gates 1 through 6 pass. Gate 7 returns the HITL decision. The action is placed in the escalation queue rather than being denied or auto-approved.
+
+Navigate to `http://localhost:5173/hitl` to see the pending request. The Human in the Loop queue shows the full context: agent identity, trust score, transfer parameters, and the policy reason for escalation. Approving or rejecting both updates the agent trust score and logs the outcome to the audit ledger.
+
+### Scenario 3: Malicious Prompt (Injection Block)
+
+**Agent**: Customer Service Agent
+
+**What happens**: The preset sends a prompt containing explicit override instructions designed to bypass Sentinel governance. The Safety Service prompt scanner detects the injection pattern before the agent even processes the message.
+
+**What to watch in the telemetry**: The scan at the top of the pipeline returns BLOCKED with the detection reason. The agent never sees the malicious content. The agent's trust score is penalized by the PROMPT_INJECTION_DETECTED signal.
+
+### Scenario 4: $5,000,000 Transaction (Hard Block)
+
+**Agent**: Treasury Agent
+
+**What happens**: The agent attempts to wire $5,000,000. The OPA policy evaluates the amount against the greater-than-$100,000 threshold and returns DENY.
+
+**What to watch in the telemetry**: Gate 7 hard blocks the action. No escalation queue, no human review option. The amount exceeds the policy boundary and the action is immediately denied. The audit ledger records the decision with the full OPA evaluation context.
+
+## Resetting Agent State
+
+If an agent's trust score drops into the QUARANTINE tier (below 40) during testing, it cannot execute any actions until its score is restored.
+
+Navigate to `http://localhost:5173/agents`, select the agent, and use the Push Signal interface to send a positive trust signal that restores the score. Alternatively, restart the Safety Service and re-register the agents to start fresh with trust scores at 100.
+
+## Other Dashboard Pages
+
+| Page | URL | What it shows |
+|---|---|---|
+| Home | `/` | System overview and live status |
+| Live Traffic | `/traffic` | Real-time request stream |
+| HITL Queue | `/hitl` | Pending human approval requests |
+| Agent Fleet | `/agents` | All registered agents with trust scores and autonomy tiers |
+| Agent Registry | `/registry` | Agent registration management |
+| Policy Engine | `/policies` | OPA Rego policy viewer and editor |
+| Audit Ledger | `/audit` | Full cryptographic audit log with hash chain |
+| Compliance Report | `/compliance` | Generated compliance summary report |

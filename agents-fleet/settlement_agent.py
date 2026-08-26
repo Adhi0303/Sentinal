@@ -31,20 +31,22 @@ def register_on_startup() -> dict:
         "agent_type": "SETTLEMENT_AGENT",
         "owner":      MERCHANT_ID,
         "allowed_tools": [
-            "GET_BALANCE", "INITIATE_PAYOUT", "GET_SETTLEMENT",
+            "GET_SETTLEMENTS", "GET_MERCHANT_BALANCE",
             "PAYOUT", "WIRE_TRANSFER"
         ],
+        "model": GROQ_DEFAULT_MODEL,
         "financial_limit_per_tx": 1_00_000.0,  # ₹1,00,000 per payout
+        "daily_budget": 5_00_000.0,
         "autonomy_tier": "HITL",               # Aggregator — always HITL
-        "description": "Processes merchant settlements and payouts. High-value operations require human approval.",
+        "purpose": "Manages merchant payouts and reconciles settlement accounts. Requires HITL for large transfers.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
         if resp.status_code in (200, 201):
-            print(f"[{AGENT_ID}] Registered with Sentinel Registry ✓")
+            print(f"[{AGENT_ID}] Registered with Sentinel Registry [SUCCESS]")
             return resp.json()
         elif resp.status_code == 409:
-            print(f"[{AGENT_ID}] Already registered ✓")
+            print(f"[{AGENT_ID}] Already registered [SUCCESS]")
             return {"status": "already_registered"}
         else:
             print(f"[{AGENT_ID}] Registration warning: {resp.status_code}")
@@ -129,7 +131,7 @@ Merchant: Aggregator ({MERCHANT_ID})
 """
 
 
-def run_agent(user_request: str) -> str:
+def run_agent(user_request: str, **kwargs) -> str:
     """Run the SettlementAgent for a single request. Returns the final response."""
     print(f"\n{'='*60}")
     print(f"[{AGENT_NAME}] Processing: {user_request[:80]}")

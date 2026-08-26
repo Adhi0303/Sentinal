@@ -33,3 +33,7 @@ frontend/dist/
 frontend/.output/
 frontend/.nitro/
 frontend/.wrangler/
+
+# Runtime data files (not for repo)
+safety-service/audit_log.jsonl
+mock-banking-api/mock_banking.log

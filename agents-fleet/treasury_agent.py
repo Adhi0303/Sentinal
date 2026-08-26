@@ -19,8 +19,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sentinel_sdk import execute_governed_tool
+from sentinel_sdk import execute_governed_tool, start_agent_trace, scan_prompt_via_safety_service
 import requests
+import re
 from llm_config import get_llm, GROQ_DEFAULT_MODEL
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -119,6 +120,50 @@ def run_demo():
     print("TREASURY AGENT DEMO COMPLETE")
     print("All actions are cryptographically logged in the Sentinel audit ledger.")
     print("=" * 60)
+
+
+def run_agent(user_input: str, account_id: str = "corp_treasury_001", use_poisoned_rag: bool = False) -> str:
+    """Wrapper for the demo chat UI."""
+    agent_id = "agent_treasury_001"
+    
+    # 1. Start execution trace
+    trace_id = start_agent_trace(agent_id)
+    print(f"[MODULE 3.1] Execution trace started: trace_id={trace_id}")
+
+    # 2. Safety service scan
+    print("\n[STEP 1] Scanning Prompt via Safety Service...")
+    prompt_scan = scan_prompt_via_safety_service(agent_id, user_input)
+    if prompt_scan.get("status") == "BLOCKED":
+        return f"[BLOCKED BY SENTINEL 2.1] {prompt_scan.get('reason')}"
+    print("[OK] Prompt is safe.")
+
+    # Parse amount using regex
+    # Match amounts like $50,000 or $5,000,000 or 5000
+    amount_match = re.search(r'\$([\d,]+(\.\d{2})?)', user_input)
+    if not amount_match:
+        return "I'm sorry, I couldn't understand the transfer amount."
+        
+    amount_str = amount_match.group(1).replace(',', '')
+    amount = float(amount_str)
+    
+    print(f"[TREASURY AGENT] Requesting wire transfer of ${amount:,.2f}")
+    
+    result = execute_wire_transfer(
+        to_account="corp_vendor_aws",
+        amount=amount,
+        reference="DEMO-SWEEP",
+        sweep_context=user_input
+    )
+    
+    status = result.get('status')
+    reason = result.get('reason', result.get('message', ''))
+    
+    if status == "ALLOWED":
+        return f"Successfully processed the transfer of ${amount:,.2f}."
+    elif status == "REQUIRE_HITL":
+        return f"[ESCALATED] This transfer requires human approval. Context: {reason}"
+    else:
+        return f"[BLOCKED BY SENTINEL 1.0] {reason}"
 
 
 if __name__ == "__main__":

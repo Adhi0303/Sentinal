@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { getApiBase, getBankingApiBase } from "@/lib/sentinel";
 import { getUser, logout } from "@/lib/auth";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
 
 export const Route = createFileRoute("/portal")({
   component: CustomerPortal,
@@ -56,20 +57,20 @@ interface LogLine {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const txnColor = (amount: number) =>
-  amount >= 0 ? "text-green-400" : "text-red-400";
+  amount >= 0 ? "text-green-700 font-bold" : "text-red-700 font-bold";
 
 const txnIcon = (amount: number) =>
   amount >= 0 ? (
-    <TrendingUp className="size-3.5 text-green-400" />
+    <TrendingUp className="size-3.5 text-green-700" />
   ) : (
-    <TrendingDown className="size-3.5 text-red-400" />
+    <TrendingDown className="size-3.5 text-red-700" />
   );
 
 const statusBadge = (status: string) => {
   const map: Record<string, string> = {
-    ACTIVE: "bg-green-500/15 text-green-400 border-green-500/20",
-    SUSPENDED: "bg-red-500/15 text-red-400 border-red-500/20",
-    PROBATION: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
+    ACTIVE: "bg-green-500/15 text-green-700 border-green-500/30 font-bold",
+    SUSPENDED: "bg-red-500/15 text-red-700 border-red-500/30 font-bold",
+    PROBATION: "bg-yellow-500/15 text-yellow-700 border-yellow-500/30 font-bold",
   };
   return map[status] ?? "bg-white/10 text-white/60 border-white/10";
 };
@@ -110,39 +111,41 @@ function CustomerPortal() {
     {
       id: 0,
       role: "ai",
-      text: `Hello ${user?.displayName?.split(" ")[0] ?? "there"}! 👋 I'm your American Express virtual assistant. How can I help you with your account today?`,
+      text: `Hello ${user?.displayName?.split(" ")[0] ?? "there"}! 👋 I'm your Sentinel virtual assistant. How can I help you with your account today?`,
     },
   ]);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const apiBase = getApiBase();
 
+  const fetchAccountData = async () => {
+    if (!user?.accountId) return;
+    try {
+      const bankBase = getBankingApiBase();
+      const [accResp, txResp] = await Promise.all([
+        fetch(`${bankBase}/api/v1/accounts/${user.accountId}`),
+        fetch(`${bankBase}/api/v1/accounts/${user.accountId}/transactions`),
+      ]);
+      if (accResp.ok) setAccount(await accResp.json());
+      if (txResp.ok) {
+        const data = await txResp.json();
+        setTransactions(data.transactions ?? []);
+      }
+    } catch {
+      // Banking API might not be up — fail gracefully
+    } finally {
+      setLoadingAccount(false);
+    }
+  };
+
   // Fetch account data
   useEffect(() => {
-    if (!user?.accountId) return;
-    const fetchData = async () => {
-      try {
-        const bankBase = getBankingApiBase();
-        const [accResp, txResp] = await Promise.all([
-          fetch(`${bankBase}/api/v1/accounts/${user.accountId}`),
-          fetch(`${bankBase}/api/v1/accounts/${user.accountId}/transactions`),
-        ]);
-        if (accResp.ok) setAccount(await accResp.json());
-        if (txResp.ok) {
-          const data = await txResp.json();
-          setTransactions(data.transactions ?? []);
-        }
-      } catch {
-        // Banking API might not be up — fail gracefully
-      } finally {
-        setLoadingAccount(false);
-      }
-    };
-    fetchData();
+    fetchAccountData();
   }, [user?.accountId]);
 
   useEffect(() => {
@@ -154,6 +157,10 @@ function CustomerPortal() {
   }, [logs]);
 
   const handleLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
     logout();
     toast.success("You've been signed out.");
     navigate({ to: "/login" });
@@ -224,6 +231,7 @@ function CustomerPortal() {
       setLogs((l) => [...l, { ts: nowStr(), text: `Connection error: ${msg}`, token: "deny" }]);
     } finally {
       setBusy(false);
+      fetchAccountData();
     }
   };
 
@@ -238,7 +246,7 @@ function CustomerPortal() {
   return (
     <div className="min-h-screen flex flex-col text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex h-24 items-center justify-between px-10">
+      <header className="fixed top-0 left-0 w-full z-50 flex h-24 items-center justify-between px-10 bg-background/50 backdrop-blur-xl border-b border-white/5">
         <div className="flex items-center gap-3">
           <div
             className="size-9 rounded-xl flex items-center justify-center"
@@ -247,7 +255,7 @@ function CustomerPortal() {
             <ShieldCheck className="size-4 text-white" strokeWidth={1.8} />
           </div>
           <div>
-            <div className="text-[15px] font-semibold tracking-tight">American Express</div>
+            <div className="text-[15px] font-semibold tracking-tight">Sentinel</div>
             <div className="text-[11px] text-muted-foreground">Customer Portal</div>
           </div>
         </div>
@@ -275,7 +283,7 @@ function CustomerPortal() {
         </div>
       </header>
 
-      <div className="px-10 pb-10 max-w-[1400px] w-full mx-auto grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)] flex-1">
+      <div className="pt-32 px-10 pb-10 max-w-[1400px] w-full mx-auto grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)] flex-1">
         {/* LEFT: Account Info + Transactions */}
         <div className="flex flex-col gap-6">
           {/* Account Summary Cards */}
@@ -397,12 +405,12 @@ function CustomerPortal() {
         {/* RIGHT: Chat + Telemetry */}
         <div className="flex flex-col gap-4">
           {/* Chat window */}
-          <div className="glass rounded-[32px] flex flex-col flex-1 h-[600px] xl:h-auto">
+          <div className="glass rounded-[32px] flex flex-col flex-1 h-[600px] xl:h-[700px] max-h-[calc(100vh-160px)]">
             <div className="px-5 py-4 border-b border-border/40 flex items-center gap-2">
               <User className="size-4 text-primary" strokeWidth={1.8} />
-              <span className="text-[13px] font-semibold">Amex Virtual Assistant</span>
-              <span className="ml-auto text-[11px] text-green-400 flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
+              <span className="text-[13px] font-semibold">Sentinel Virtual Assistant</span>
+              <span className="ml-auto text-[11px] font-medium text-green-600 flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-green-600 inline-block animate-pulse" />
                 Online
               </span>
             </div>
@@ -419,9 +427,7 @@ function CustomerPortal() {
                       "max-w-[85%] rounded-[16px] px-4 py-3 text-[13px] leading-relaxed",
                       m.role === "user"
                         ? "text-white rounded-br-[4px]"
-                        : m.tone === "blocked"
-                          ? "bg-red-500/10 border border-red-500/20 text-red-300 rounded-bl-[4px]"
-                          : "glass text-foreground rounded-bl-[4px]",
+                        : "glass text-foreground rounded-bl-[4px]",
                     )}
                     style={
                       m.role === "user"
@@ -429,7 +435,13 @@ function CustomerPortal() {
                         : {}
                     }
                   >
-                    {m.text}
+                    {m.role === "user" ? (
+                      m.text
+                    ) : (
+                      <div className="markdown-content">
+                        <ReactMarkdown>{m.text}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -438,7 +450,7 @@ function CustomerPortal() {
                   <div className="glass rounded-[16px] rounded-bl-[4px] px-4 py-3 flex items-center gap-3 text-[12px] text-muted-foreground max-w-[85%]">
                     <div className="size-3.5 rounded-full border-2 border-primary/30 border-t-primary animate-spin shrink-0" />
                     <span className="truncate">
-                      Amex Virtual Assistant is working...
+                      Sentinel Virtual Assistant is working...
                     </span>
                   </div>
                 </div>
@@ -472,6 +484,37 @@ function CustomerPortal() {
 
         </div>
       </div>
+
+      {/* Custom Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="glass rounded-[24px] p-6 max-w-sm w-full shadow-2xl flex flex-col items-center text-center">
+            <div className="size-12 rounded-full bg-red-500/10 text-red-600 flex items-center justify-center mb-4">
+              <LogOut className="size-6" strokeWidth={1.5} />
+            </div>
+            <h3 className="text-[18px] font-semibold text-foreground tracking-tight mb-2">
+              Sign Out
+            </h3>
+            <p className="text-[13px] text-muted-foreground mb-6">
+              Are you sure you want to sign out of the Sentinel Customer Portal?
+            </p>
+            <div className="flex items-center gap-3 w-full">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 rounded-[12px] border border-border/50 bg-white/5 hover:bg-white/10 px-4 py-2.5 text-[13px] font-semibold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                className="flex-1 rounded-[12px] bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 text-[13px] font-semibold transition-all shadow-lg"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

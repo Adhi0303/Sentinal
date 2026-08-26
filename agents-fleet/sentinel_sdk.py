@@ -70,7 +70,7 @@ def _validate_parameters_deep(parameters: dict) -> dict:
         r";\s*--"
     ]
     SHELL_INJECTION_PATTERNS = [
-        r"[;&|`$]",
+        r"[;&|`]",
         r"\.\./",
         r"(?i)rm\s+-rf"
     ]

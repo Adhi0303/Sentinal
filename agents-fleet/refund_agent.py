@@ -41,17 +41,19 @@ def register_on_startup() -> dict:
             "GET_PAYMENT", "GET_ORDER", "INITIATE_REFUND",
             "REFUND", "PAYMENT_CAPTURE"
         ],
+        "model": GROQ_DEFAULT_MODEL,
         "financial_limit_per_tx": 10_000.0,  # ₹10,000 per Razorpay refund policy
+        "daily_budget": 100_000.0,
         "autonomy_tier": "BOUNDED",
-        "description": "Processes customer refund requests for e-commerce orders. Governed by OPA razorpay_refund policy.",
+        "purpose": "Processes customer refund requests for e-commerce orders. Governed by OPA razorpay_refund policy.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
         if resp.status_code in (200, 201):
-            print(f"[{AGENT_ID}] Registered with Sentinel Registry ✓")
+            print(f"[{AGENT_ID}] Registered with Sentinel Registry [SUCCESS]")
             return resp.json()
         elif resp.status_code == 409:
-            print(f"[{AGENT_ID}] Already registered with Sentinel Registry ✓")
+            print(f"[{AGENT_ID}] Already registered with Sentinel Registry [SUCCESS]")
             return {"status": "already_registered", "agent_id": AGENT_ID}
         else:
             print(f"[{AGENT_ID}] Registration warning: {resp.status_code} {resp.text[:100]}")
@@ -142,7 +144,7 @@ Merchant: Store ({MERCHANT_ID})
 """
 
 
-def run_agent(user_request: str) -> str:
+def run_agent(user_request: str, **kwargs) -> str:
     """Run the RefundAgent for a single user request. Returns the final response."""
     print(f"\n{'='*60}")
     print(f"[{AGENT_NAME}] Processing request: {user_request[:80]}")

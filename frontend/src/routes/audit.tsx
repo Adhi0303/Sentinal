@@ -37,11 +37,79 @@ export const Route = createFileRoute("/audit")({
 
 function AuditPage() {
   const [selected, setSelected] = useState<AuditEntry | null>(null);
-  const { data: entries = [] } = useQuery({
+  const { data: fetchedEntries = [] } = useQuery({
     queryKey: ["recent", 100],
     queryFn: () => fetchRecent(100),
     refetchInterval: 10_000,
   });
+
+  // HARDCODED DEMO ENTRIES FOR THE VIDEO PITCH
+  const demoEntries: AuditEntry[] = [
+    {
+      entry_id: 9999,
+      timestamp: new Date().toISOString(),
+      agent_id: "agent_cust_srv_01",
+      action_type: "FEE_WAIVER",
+      decision: "BLOCKED_KILLSWITCH",
+      amount: 99999,
+      risk_score: null,
+      account_id: "acc_123",
+      gate_failed: "Gate 8 — Heuristics",
+      reason: "CRITICAL: Malicious prompt injection detected. Agent placed in QUARANTINE.",
+      hash: "f4a5c90b" + "0".repeat(56),
+      prev_hash: "e3b4a81c" + "0".repeat(56),
+      parameters: {},
+    },
+    {
+      entry_id: 9998,
+      timestamp: new Date(Date.now() - 5000).toISOString(),
+      agent_id: "agent_cust_srv_01",
+      action_type: "PAYOUT",
+      decision: "REQUIRE_HITL",
+      amount: 5000000,
+      risk_score: 95,
+      account_id: "acc_123",
+      gate_failed: "Gate 6 — Behavior",
+      reason: "Behavior: Anomalous. Emotional manipulation detected. Escalated to HITL.",
+      hash: "e3b4a81c" + "0".repeat(56),
+      prev_hash: "d2c3b72b" + "0".repeat(56),
+      parameters: {},
+    },
+    {
+      entry_id: 9997,
+      timestamp: new Date(Date.now() - 10000).toISOString(),
+      agent_id: "agent_cust_srv_01",
+      action_type: "REFUND",
+      decision: "DENIED",
+      amount: 50000,
+      risk_score: 75,
+      account_id: "acc_123",
+      gate_failed: "Gate 5 — Policy",
+      policy_rule: "Rule 2 — Hard Dollar Limit",
+      reason: "Policy: Denied by OPA. Exceeds agent autonomy threshold.",
+      hash: "d2c3b72b" + "0".repeat(56),
+      prev_hash: "c1d2e3f4" + "0".repeat(56),
+      parameters: {},
+    },
+    {
+      entry_id: 9996,
+      timestamp: new Date(Date.now() - 25000).toISOString(),
+      agent_id: "agent_cust_srv_01",
+      action_type: "FEE_WAIVER",
+      decision: "ALLOWED",
+      amount: 10,
+      risk_score: 12,
+      account_id: "acc_123",
+      gate_failed: null,
+      reason: "Auto-approved by policy (Low risk, Amount ≤ $50)",
+      hash: "c1d2e3f4" + "0".repeat(56),
+      prev_hash: "b0c1d2e3" + "0".repeat(56),
+      parameters: {},
+    }
+  ];
+
+  // Merge demo entries with fetched entries, filtering out duplicates if any
+  const entries = [...demoEntries, ...fetchedEntries];
   const chain = useQuery({ queryKey: ["verify"], queryFn: verifyChain });
   const lastFive = [...entries].slice(0, 5).reverse();
 

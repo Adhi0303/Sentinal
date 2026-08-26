@@ -32,17 +32,19 @@ def register_on_startup() -> dict:
         "allowed_tools": [
             "GET_PAYMENT", "EXPLAIN_FAILURE", "GET_ORDER"
         ],
+        "model": GROQ_FAST_MODEL,
         "financial_limit_per_tx": 0.0,   # read-only — no financial authority
+        "daily_budget": 0.0,
         "autonomy_tier": "FULL",          # read-only ops are safe to run autonomously
-        "description": "Handles customer payment queries for FoodieApp. Investigation-only — no financial write authority.",
+        "purpose": "Answers customer inquiries and looks up order/payment details. Cannot initiate financial transactions.",
     }
     try:
         resp = requests.post(f"{SAFETY_SERVICE_URL}/agents/register", json=payload, timeout=5)
         if resp.status_code in (200, 201):
-            print(f"[{AGENT_ID}] Registered with Sentinel Registry ✓")
+            print(f"[{AGENT_ID}] Registered with Sentinel Registry [SUCCESS]")
             return resp.json()
         elif resp.status_code == 409:
-            print(f"[{AGENT_ID}] Already registered ✓")
+            print(f"[{AGENT_ID}] Already registered [SUCCESS]")
             return {"status": "already_registered"}
         else:
             print(f"[{AGENT_ID}] Registration warning: {resp.status_code}")
@@ -116,7 +118,7 @@ Merchant: FoodieApp ({MERCHANT_ID})
 """
 
 
-def run_agent(user_request: str) -> str:
+def run_agent(user_request: str, **kwargs) -> str:
     """Run the SupportAgent for a single request. Returns the final response."""
     print(f"\n{'='*60}")
     print(f"[{AGENT_NAME}] Processing: {user_request[:80]}")

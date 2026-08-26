@@ -27,7 +27,7 @@ app.add_middleware(
 accounts = {
     # Consumer Accounts (Customer Service Agent)
     "acc_123": {
-        "name": "Sarah Johnson",
+        "name": "Adhi Kumar",
         "type": "CONSUMER",
         "status": "ACTIVE",
         "balance": 1000.0,
@@ -58,7 +58,7 @@ accounts = {
     },
     # Corporate — Treasury Agent
     "corp_treasury_001": {
-        "name": "American Express Treasury Division",
+        "name": "Sentinel Treasury Division",
         "type": "CORPORATE",
         "status": "ACTIVE",
         "balance": 50_000_000.0,

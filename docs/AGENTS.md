@@ -1,39 +1,61 @@
 # Autonomous Agent Fleet
 
-The `agents-fleet/` directory contains the autonomous AI agents that act as the primary "users" of the Sentinel system. Instead of humans clicking buttons, these LLM-powered agents interpret natural language requests and attempt to execute financial actions using tools.
+The `agents-fleet/` directory contains the autonomous AI agents that act as the primary users of the Sentinel system. Instead of humans clicking buttons, these LLM-powered agents interpret natural language requests and attempt to execute financial actions using tools.
 
 ## The Sentinel SDK
-The most critical rule of the agent fleet is that **no agent possesses direct API keys to the backend banking system**. 
 
-Every agent must import and use `agents-fleet/sentinel_sdk.py`. When an agent decides to use a tool (e.g., `execute_refund`), the tool is merely a wrapper around the SDK's `execute_governed_tool()` function. This function intercepts the intent and routes it through the Safety Service's 9-gate pipeline.
+The most critical rule of the agent fleet is that no agent possesses direct API keys to the backend banking system.
 
-## Active Razorpay Agents
+Every agent must import and use `agents-fleet/sentinel_sdk.py`. When an agent decides to use a tool (for example, `waive_customer_fee`), the tool is merely a wrapper around the SDK's `execute_governed_tool()` function. This function intercepts the intent and routes it through the Safety Service's 9-gate governance pipeline before any action reaches the banking API.
 
-We have tailored the fleet to support a Razorpay-style merchant ecosystem.
+## Active Agents
 
-### 1. Refund Agent (`refund_agent.py`)
-- **Agent ID**: `refund-agent-001`
-- **Capabilities**: `GET_PAYMENT`, `GET_ORDER`, `REFUND`, `PAYMENT_CAPTURE`
-- **Role**: Handles customer service requests for a fictional merchant. It can look up payments and issue partial or full refunds. If it attempts to refund an amount greater than the original order, Sentinel's Rego policies will catch and block it.
+The fleet is built around a consumer banking workflow demonstrating Sentinel's adaptive autonomy model.
 
-### 2. Settlement Agent (`settlement_agent.py`)
-- **Agent ID**: `settlement-agent-001`
-- **Capabilities**: `GET_BALANCE`, `GET_SETTLEMENT`, `PAYOUT`
-- **Role**: Manages B2B vendor payouts for a fictional merchant. It executes large money movements (payouts). Due to the high-value nature of payouts, its actions frequently trigger the HITL (Human-in-the-Loop) gate, requiring an operator to approve the transaction on the dashboard.
+### 1. Customer Service Agent (`customer_service_agent.py`)
 
-### 3. Fraud Agent (`fraud_analysis_agent.py`)
-- **Agent ID**: `fraud-agent-001`
-- **Capabilities**: `GET_PAYMENT`, `GET_TRANSACTIONS`, `PAYMENT_CAPTURE`
-- **Role**: Monitors suspected fraudulent transactions for a fictional merchant. It can look up historical transactions to identify patterns and capture authorized payments once they are deemed safe.
+**Agent ID**: `agent_cust_srv_01`
 
-## Agent Architecture (LangChain + Groq)
+**LLM**: Llama 4 Maverick via Groq
 
-Each agent is built using **LangChain** and powered by **Groq** (specifically `llama-3.1-70b-versatile` or `llama3-70b-8192` models for fast inference).
+**Capabilities**: `get_account_details`, `get_transaction_history`, `check_waiver_eligibility`, `waive_customer_fee`
 
-The agents use the ReAct (Reasoning + Acting) prompting strategy:
-1. **Thought**: The LLM analyzes the user's request.
-2. **Action**: The LLM decides to call a specific tool with JSON arguments.
-3. **Observation**: The SDK returns the result of the action (which might be a success, a policy denial, or a HITL pending state).
-4. **Response**: The LLM formulates a final response to the user based on the observation.
+**Role**: Handles customer account inquiries and fee waiver requests. The agent follows a mandatory investigation workflow before taking any action: it must first look up the account details, verify the fee actually exists in the transaction history, confirm the account is eligible, and only then attempt to execute the waiver. The Sentinel SDK intercepts the `waive_customer_fee` tool call and routes it through the full governance pipeline.
 
-If an agent goes rogue (e.g., due to a prompt injection attack), the Sentinel Control Plane will detect the behavioral anomaly, slash the agent's trust score, and automatically downgrade its autonomy tier, preventing it from doing further damage.
+This agent demonstrates Sentinel's low-risk autonomous operation. A $10 fee waiver from a trusted account with a healthy agent trust score passes all 9 gates and executes without human intervention.
+
+**Financial Limit**: $500 per transaction, $5,000 daily budget
+
+### 2. Treasury Agent (`treasury_agent.py`)
+
+**Agent ID**: `agent_treasury_001`
+
+**LLM**: GPT-class model via Groq
+
+**Capabilities**: `WIRE_TRANSFER`
+
+**Role**: Handles high-value intraday wire transfers and liquidity sweeps. The agent uses an LLM to analyze sweep parameters and produce a liquidity impact summary before calling `execute_wire_transfer`. The Sentinel SDK intercepts the call and evaluates it against the active OPA Rego trading limits policy.
+
+This agent demonstrates Sentinel's graduated response model. A $50,000 transfer triggers a HITL escalation requiring human approval. A $5,000,000 transfer is hard-blocked by the OPA policy regardless of any other factor.
+
+**Financial Limit**: Configured for large-value operations, with OPA policy controlling actual approvals
+
+## Governance Model
+
+Both agents use the Reasoning + Acting (ReAct) pattern:
+
+1. **Thought**: The LLM analyzes the incoming user request and decides what to investigate or do.
+2. **Action**: The LLM invokes a specific tool with structured JSON arguments.
+3. **Observation**: The Sentinel SDK intercepts the tool call, runs the 9-gate pipeline, and returns either a success response, a policy denial, or a HITL pending state.
+4. **Response**: The LLM formulates a final reply to the user based on what Sentinel returned.
+
+If an agent is subjected to a prompt injection attack, the Sentinel Control Plane detects the suspicious parameters at Gate 3 (Deep Parameter Validation) or via the Safety Service prompt scanner before the agent executes anything. The agent's trust score is penalized, and if the score drops far enough, the autonomy tier downgrades automatically, preventing the compromised agent from taking further high-risk actions.
+
+## Adding a New Agent
+
+To add an agent to the fleet:
+
+1. Write the agent logic in `agents-fleet/your_agent.py`
+2. Import `execute_governed_tool` from `sentinel_sdk` and wrap every financial tool call through it
+3. Register the agent with the Safety Service by POSTing to `/api/v1/agents/register` with the agent identity, allowed tools, and financial limits
+4. The agent is immediately subject to the full 9-gate pipeline with no additional configuration required

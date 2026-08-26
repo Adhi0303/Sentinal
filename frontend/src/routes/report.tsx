@@ -55,7 +55,7 @@ function ReportPage() {
           <p className="mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase">
             Sentinel Gateway — Regulatory Compliance Report
           </p>
-          <h2 className="mt-1 text-base font-bold">American Express</h2>
+          <h2 className="mt-1 text-base font-bold">Sentinel Gateway</h2>
           <p className="mono text-[12px] text-muted-foreground">Report ID: {data?.report_id ?? "…"}</p>
 
           <div className="mt-6">

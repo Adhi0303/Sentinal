@@ -72,8 +72,8 @@ function LoginPage() {
               <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
                 Sentinel Gateway
               </h1>
-              <p className="text-[13px] text-muted-foreground mt-1">
-                American Express AI Safety Platform
+              <p className="text-[13px] font-medium tracking-wide text-primary/80 uppercase">
+                Sentinel AI Safety Platform
               </p>
             </div>
           </div>

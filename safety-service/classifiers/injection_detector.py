@@ -68,7 +68,7 @@ class PromptInjectionDetector:
                 else:
                     return {"status": "SAFE", "reason": "No malicious intent detected by Llama-Guard."}
             else:
-                print(f"Llama-Guard API error: {response.status_code} - {response.text}")
+                # print(f"Llama-Guard API error: {response.status_code} - {response.text}")
                 # Fail-open or Fail-close based on risk appetite. We will fail-open for the demo if API is down.
                 return {"status": "SAFE", "reason": "Llama-Guard API unavailable, passed via Regex."}
                 

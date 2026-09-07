@@ -1,10 +1,10 @@
 # Sentinel: Zero Trust Governance Control Plane for Autonomous Financial AI Agents
 
 **Watch the Pitch Deck Video:**
-<video src="./Sentinel_pitch_deck.mp4" controls="controls" style="max-height:640px; min-height: 200px">
-  Your browser does not support the video tag.
-</video>
-*(If the video does not play inline, [download it here](./Sentinel_pitch_deck.mp4))*
+
+https://github.com/Adhi0303/Sentinal/raw/main/Sentinel_pitch_deck.mp4
+
+*(If the video does not play inline, [download it here](https://github.com/Adhi0303/Sentinal/raw/main/Sentinel_pitch_deck.mp4))*
 
 ## The Problem Worth Solving
 

@@ -1,5 +1,11 @@
 # Sentinel: Zero Trust Governance Control Plane for Autonomous Financial AI Agents
 
+**Watch the Pitch Deck Video:**
+<video src="./Sentinel_pitch_deck.mp4" controls="controls" style="max-height:640px; min-height: 200px">
+  Your browser does not support the video tag.
+</video>
+*(If the video does not play inline, [download it here](./Sentinel_pitch_deck.mp4))*
+
 ## The Problem Worth Solving
 
 Financial institutions are at an inflection point. Autonomous AI agents are no longer theoretical. They are being deployed right now to process refunds, execute wire transfers, manage merchant settlements, and resolve customer disputes at a scale no human team could match.
